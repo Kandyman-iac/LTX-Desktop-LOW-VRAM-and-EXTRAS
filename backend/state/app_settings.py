@@ -86,6 +86,9 @@ class AppSettings(SettingsBaseModel):
     gguf_transformer_path: str = ""
     use_abliterated_encoder: bool = False
     use_multi_gpu: bool = False
+    # VAE tiling (0 = use library defaults: 512px spatial, 64 frames temporal)
+    vae_spatial_tile_size: int = 0
+    vae_temporal_tile_size: int = 0
 
     @field_validator("block_swap_blocks_on_gpu", mode="before")
     @classmethod
@@ -179,6 +182,8 @@ class SettingsResponse(SettingsBaseModel):
     gguf_transformer_path: str = ""
     use_abliterated_encoder: bool = False
     use_multi_gpu: bool = False
+    vae_spatial_tile_size: int = 0
+    vae_temporal_tile_size: int = 0
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:

@@ -27,6 +27,8 @@ class LTXFastVideoPipeline:
         attention_tile_size: int = 0,
         use_fp8_transformer: bool = False,
         gguf_transformer_path: str = "",
+        vae_spatial_tile_size: int = 0,
+        vae_temporal_tile_size: int = 0,
     ) -> "LTXFastVideoPipeline":
         return LTXFastVideoPipeline(
             checkpoint_path=checkpoint_path,
@@ -38,6 +40,8 @@ class LTXFastVideoPipeline:
             attention_tile_size=attention_tile_size,
             use_fp8_transformer=use_fp8_transformer,
             gguf_transformer_path=gguf_transformer_path,
+            vae_spatial_tile_size=vae_spatial_tile_size,
+            vae_temporal_tile_size=vae_temporal_tile_size,
         )
 
     def __init__(
@@ -51,6 +55,8 @@ class LTXFastVideoPipeline:
         attention_tile_size: int = 0,
         use_fp8_transformer: bool = False,
         gguf_transformer_path: str = "",
+        vae_spatial_tile_size: int = 0,
+        vae_temporal_tile_size: int = 0,
     ) -> None:
         from ltx_core.quantization import QuantizationPolicy
         from ltx_pipelines.distilled import DistilledPipeline
@@ -60,6 +66,8 @@ class LTXFastVideoPipeline:
         self._block_swap_blocks_on_gpu = block_swap_blocks_on_gpu
         self._attention_tile_size = attention_tile_size
         self._gguf_transformer_path = gguf_transformer_path
+        self._vae_spatial_tile_size = vae_spatial_tile_size
+        self._vae_temporal_tile_size = vae_temporal_tile_size
 
         # FP8: use setting OR auto-detect CUDA support.
         # The pipeline (transformer/VAE) always runs on device (video GPU, cuda:0).
@@ -180,7 +188,10 @@ class LTXFastVideoPipeline:
         images: list[ImageConditioningInput],
         output_path: str,
     ) -> None:
-        tiling_config = default_tiling_config()
+        tiling_config = default_tiling_config(
+            spatial_tile_size=self._vae_spatial_tile_size,
+            temporal_tile_size=self._vae_temporal_tile_size,
+        )
         video, audio = self._run_inference(
             prompt=prompt,
             seed=seed,

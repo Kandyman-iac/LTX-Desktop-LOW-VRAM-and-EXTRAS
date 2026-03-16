@@ -15,10 +15,39 @@ if TYPE_CHECKING:
     from ltx_core.types import LatentState
 
 
-def default_tiling_config() -> TilingConfigType:
-    from ltx_core.model.video_vae import TilingConfig
+def default_tiling_config(
+    spatial_tile_size: int = 0,
+    temporal_tile_size: int = 0,
+) -> TilingConfigType:
+    """Return a TilingConfig, optionally overriding the spatial/temporal tile sizes.
 
-    return TilingConfig.default()
+    Passing 0 (the default) uses the library defaults:
+      spatial  512 px tiles with 64 px overlap
+      temporal  64 frame tiles with 24 frame overlap
+    """
+    from ltx_core.model.video_vae import TilingConfig, SpatialTilingConfig, TemporalTilingConfig
+
+    if spatial_tile_size <= 0 and temporal_tile_size <= 0:
+        return TilingConfig.default()
+
+    default = TilingConfig.default()
+    spatial = (
+        SpatialTilingConfig(
+            tile_size_in_pixels=max(64, (spatial_tile_size // 32) * 32),
+            tile_overlap_in_pixels=64,
+        )
+        if spatial_tile_size > 0
+        else default.spatial_config
+    )
+    temporal = (
+        TemporalTilingConfig(
+            tile_size_in_frames=max(16, (temporal_tile_size // 8) * 8),
+            tile_overlap_in_frames=24,
+        )
+        if temporal_tile_size > 0
+        else default.temporal_config
+    )
+    return TilingConfig(spatial_config=spatial, temporal_config=temporal)
 
 
 def default_guiders() -> tuple[MultiModalGuiderParams, MultiModalGuiderParams]:

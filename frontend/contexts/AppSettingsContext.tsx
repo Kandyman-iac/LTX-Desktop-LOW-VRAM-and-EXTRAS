@@ -37,6 +37,8 @@ export interface AppSettings {
   ggufTransformerPath: string
   useAbliteratedEncoder: boolean
   civitaiLoras: string
+  vaeSpatialTileSize: number
+  vaeTemporalTileSize: number
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -64,6 +66,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   ggufTransformerPath: '',
   useAbliteratedEncoder: false,
   civitaiLoras: '[]',
+  vaeSpatialTileSize: 0,
+  vaeTemporalTileSize: 0,
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -121,6 +125,8 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     ggufTransformerPath: data.ggufTransformerPath ?? DEFAULT_APP_SETTINGS.ggufTransformerPath,
     useAbliteratedEncoder: data.useAbliteratedEncoder ?? DEFAULT_APP_SETTINGS.useAbliteratedEncoder,
     civitaiLoras: data.civitaiLoras ?? DEFAULT_APP_SETTINGS.civitaiLoras,
+    vaeSpatialTileSize: data.vaeSpatialTileSize ?? DEFAULT_APP_SETTINGS.vaeSpatialTileSize,
+    vaeTemporalTileSize: data.vaeTemporalTileSize ?? DEFAULT_APP_SETTINGS.vaeTemporalTileSize,
   }
 }
 

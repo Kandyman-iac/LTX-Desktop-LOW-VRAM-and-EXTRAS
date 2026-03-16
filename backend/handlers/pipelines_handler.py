@@ -150,6 +150,8 @@ class PipelinesHandler(StateHandlerBase):
             attention_tile_size=settings.attention_tile_size,
             use_fp8_transformer=settings.use_fp8_transformer,
             gguf_transformer_path=settings.gguf_transformer_path,
+            vae_spatial_tile_size=settings.vae_spatial_tile_size,
+            vae_temporal_tile_size=settings.vae_temporal_tile_size,
         )
 
         state = VideoPipelineState(

@@ -162,6 +162,9 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       if (settings.seed != null) {
         body.seed = settings.seed
       }
+      if (negativePrompt) {
+        body.negativePrompt = negativePrompt
+      }
       if (imagePath) {
         body.imagePath = imagePath
       }

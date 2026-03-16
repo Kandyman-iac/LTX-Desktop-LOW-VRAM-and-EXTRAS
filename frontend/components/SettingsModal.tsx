@@ -210,6 +210,16 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     onSettingsChange({ ...settings, attentionTileSize: v })
   }
 
+  const handleVaeSpatialTileSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Math.max(0, Math.min(4096, parseInt(e.target.value) || 0))
+    onSettingsChange({ ...settings, vaeSpatialTileSize: v })
+  }
+
+  const handleVaeTemporalTileSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Math.max(0, Math.min(512, parseInt(e.target.value) || 0))
+    onSettingsChange({ ...settings, vaeTemporalTileSize: v })
+  }
+
   // Prompt Enhancer handlers
   const handleTogglePromptEnhancer = (mode: 't2v' | 'i2v') => {
     if (mode === 't2v') {
@@ -1172,6 +1182,40 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       placeholder="e.g. C:\models\transformer.gguf"
                       className="w-full px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
                     />
+                  </div>
+
+                  {/* VAE Tiling */}
+                  <div className="space-y-2 pt-2 border-t border-zinc-700">
+                    <div>
+                      <label className="text-sm text-white">VAE Tiling</label>
+                      <p className="text-xs text-zinc-500">Reduce VRAM during decode. 0 = library defaults (512px spatial, 64 frames temporal)</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-zinc-400">Spatial tile (px)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="4096"
+                          step="32"
+                          value={settings.vaeSpatialTileSize ?? 0}
+                          onChange={handleVaeSpatialTileSizeChange}
+                          className="w-full px-2 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-zinc-400">Temporal tile (frames)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="512"
+                          step="8"
+                          value={settings.vaeTemporalTileSize ?? 0}
+                          onChange={handleVaeTemporalTileSizeChange}
+                          className="w-full px-2 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 

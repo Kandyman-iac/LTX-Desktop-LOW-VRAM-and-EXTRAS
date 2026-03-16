@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X } from 'lucide-react'
+import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film } from 'lucide-react'
 import { logger } from '../lib/logger'
 import { ImageUploader } from '../components/ImageUploader'
 import { AudioUploader } from '../components/AudioUploader'
@@ -22,6 +22,7 @@ import { sanitizeForcedApiVideoSettings } from '../lib/api-video-options'
 import { RetakePanel } from '../components/RetakePanel'
 import { ICLoraPanel, CONDITIONING_TYPES, type ICLoraConditioningType } from '../components/ICLoraPanel'
 import { useGenerationHistory, type HistoryEntry } from '../hooks/use-generation-history'
+import { OutputBrowser } from '../components/OutputBrowser'
 
 const DEFAULT_SETTINGS: GenerationSettings = {
   model: 'fast',
@@ -43,10 +44,13 @@ export function Playground() {
   const { forceApiGenerations, shouldVideoGenerateWithLtxApi } = useAppSettings()
   const [mode, setMode] = useState<GenerationMode>('text-to-video')
   const [prompt, setPrompt] = useState('')
+  const [negativePrompt, setNegativePrompt] = useState('')
+  const [showNegativePrompt, setShowNegativePrompt] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [selectedAudio, setSelectedAudio] = useState<string | null>(null)
   const [settings, setSettings] = useState<GenerationSettings>(() => ({ ...DEFAULT_SETTINGS }))
   const [showHistory, setShowHistory] = useState(false)
+  const [showOutputBrowser, setShowOutputBrowser] = useState(false)
   const { push: pushHistory, getAll: getHistory, remove: removeHistory } = useGenerationHistory()
   const historyEntries = useMemo(() => (showHistory ? getHistory() : []), [showHistory, getHistory])
 
@@ -185,7 +189,7 @@ export function Playground() {
       const imagePath = selectedImage ? fileUrlToPath(selectedImage) : null
       const audioPath = selectedAudio ? fileUrlToPath(selectedAudio) : null
       if (audioPath) effectiveVideoSettings.model = 'pro'
-      generate(prompt, imagePath, effectiveVideoSettings, audioPath)
+      generate(prompt, imagePath, effectiveVideoSettings, audioPath, negativePrompt)
     }
   }
   
@@ -204,6 +208,7 @@ export function Playground() {
 
   const handleClearAll = () => {
     setPrompt('')
+    setNegativePrompt('')
     setSelectedImage(null)
     setSelectedAudio(null)
     const baseDefaults = { ...DEFAULT_SETTINGS }
@@ -236,6 +241,10 @@ export function Playground() {
 
   const restoreFromHistory = (entry: HistoryEntry) => {
     setPrompt(entry.prompt)
+    if (entry.negativePrompt) {
+      setNegativePrompt(entry.negativePrompt)
+      setShowNegativePrompt(true)
+    }
     setSettings(entry.settings)
     setShowHistory(false)
   }
@@ -273,13 +282,23 @@ export function Playground() {
         <div className="flex items-center gap-4 pr-20">
           {/* Model Status Dropdown */}
           {!forceApiGenerations && <ModelStatusDropdown />}
-          
+
           {/* GPU Info */}
           {status.gpuInfo && (
             <div className="text-sm text-zinc-500">
               {status.gpuInfo.name} ({(status.gpuInfo.vramUsed / 1024).toFixed(1)}GB / {Math.round(status.gpuInfo.vram / 1024)}GB)
             </div>
           )}
+
+          {/* Output Browser button */}
+          <button
+            onClick={() => setShowOutputBrowser(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            title="Browse generated outputs"
+          >
+            <Film className="h-4 w-4" />
+            Outputs
+          </button>
         </div>
       </header>
 
@@ -424,6 +443,27 @@ export function Playground() {
                 maxChars={5000}
                 disabled={isBusy}
               />
+
+              {/* Negative prompt */}
+              <div className="mt-2">
+                <button
+                  onClick={() => setShowNegativePrompt(p => !p)}
+                  className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <span className={`transition-transform ${showNegativePrompt ? 'rotate-90' : ''}`}>▶</span>
+                  Negative prompt
+                </button>
+                {showNegativePrompt && (
+                  <textarea
+                    placeholder="What to avoid in the generation..."
+                    value={negativePrompt}
+                    onChange={(e) => setNegativePrompt(e.target.value)}
+                    disabled={isBusy}
+                    rows={2}
+                    className="mt-1.5 w-full resize-none rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-600 disabled:opacity-50"
+                  />
+                )}
+              </div>
             </div>
 
             {/* Settings */}
@@ -554,6 +594,11 @@ export function Playground() {
           )}
         </div>
       </main>
+
+      <OutputBrowser
+        isOpen={showOutputBrowser}
+        onClose={() => setShowOutputBrowser(false)}
+      />
     </div>
   )
 }
