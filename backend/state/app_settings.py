@@ -76,6 +76,26 @@ class AppSettings(SettingsBaseModel):
     locked_seed: int = 42
     models_dir: str = ""
 
+    # ── VRAM optimisation settings ──────────────────────────────────────
+    block_swap_blocks_on_gpu: int = 0
+    use_fp8_transformer: bool = False
+    attention_tile_size: int = 0
+    text_encoder_device: str = ""
+    transformer_device: str = ""
+    civitai_loras: str = "[]"
+    gguf_transformer_path: str = ""
+    use_abliterated_encoder: bool = False
+
+    @field_validator("block_swap_blocks_on_gpu", mode="before")
+    @classmethod
+    def _clamp_block_swap(cls, value: Any) -> int:
+        return _clamp_int(value, minimum=0, maximum=48, default=0)
+
+    @field_validator("attention_tile_size", mode="before")
+    @classmethod
+    def _clamp_attention_tile(cls, value: Any) -> int:
+        return _clamp_int(value, minimum=0, maximum=16384, default=0)
+
     @field_validator("prompt_cache_size", mode="before")
     @classmethod
     def _clamp_prompt_cache_size(cls, value: Any) -> int:
@@ -147,6 +167,16 @@ class SettingsResponse(SettingsBaseModel):
     seed_locked: bool = False
     locked_seed: int = 42
     models_dir: str = ""
+
+    # ── VRAM optimisation settings ──────────────────────────────────────
+    block_swap_blocks_on_gpu: int = 0
+    use_fp8_transformer: bool = False
+    attention_tile_size: int = 0
+    text_encoder_device: str = ""
+    transformer_device: str = ""
+    civitai_loras: str = "[]"
+    gguf_transformer_path: str = ""
+    use_abliterated_encoder: bool = False
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:
