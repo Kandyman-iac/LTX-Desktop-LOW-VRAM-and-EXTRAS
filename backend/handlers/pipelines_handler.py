@@ -127,13 +127,19 @@ class PipelinesHandler(StateHandlerBase):
 
         # Resolve transformer device — use per-setting override if set,
         # otherwise fall back to RuntimeConfig.transformer_device.
-        transformer_device = self.config.transformer_device
+        # Multi-GPU: only split if explicitly enabled AND 2+ GPUs present.
+        transformer_device = self.config.device
+        if settings.use_multi_gpu:
+            if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
+                transformer_device = torch.device("cuda:1")
+                logger.info("Multi-GPU: video/transformer on cuda:0, text encoder on cuda:1")
+            else:
+                logger.warning("use_multi_gpu=True but <2 GPUs detected — single GPU mode")
         if settings.transformer_device:
             try:
                 transformer_device = torch.device(settings.transformer_device)
             except Exception:
                 pass
-
         pipeline = self._fast_video_pipeline_class.create(
             checkpoint_path,
             gemma_root,

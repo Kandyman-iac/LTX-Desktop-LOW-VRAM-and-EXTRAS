@@ -61,7 +61,8 @@ class LTXFastVideoPipeline:
         self._attention_tile_size = attention_tile_size
         self._gguf_transformer_path = gguf_transformer_path
 
-        # FP8: use setting OR auto-detect device support.
+        # FP8: use setting OR auto-detect CUDA support.
+        # The pipeline (transformer/VAE) always runs on device (video GPU, cuda:0).
         use_fp8 = use_fp8_transformer or device_supports_fp8(device)
 
         self.pipeline = DistilledPipeline(
@@ -69,7 +70,7 @@ class LTXFastVideoPipeline:
             gemma_root=cast(str, gemma_root),
             spatial_upsampler_path=upsampler_path,
             loras=[],
-            device=self._transformer_device,
+            device=device,
             quantization=QuantizationPolicy.fp8_cast() if use_fp8 else None,
         )
 

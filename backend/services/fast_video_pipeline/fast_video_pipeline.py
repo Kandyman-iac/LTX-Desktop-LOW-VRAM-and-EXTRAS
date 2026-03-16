@@ -19,6 +19,11 @@ class FastVideoPipeline(Protocol):
         gemma_root: str | None,
         upsampler_path: str,
         device: torch.device,
+        transformer_device: torch.device | None = None,
+        block_swap_blocks_on_gpu: int = 0,
+        attention_tile_size: int = 0,
+        use_fp8_transformer: bool = False,
+        gguf_transformer_path: str = "",
     ) -> "FastVideoPipeline":
         ...
 

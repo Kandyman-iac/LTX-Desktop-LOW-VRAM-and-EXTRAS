@@ -1,5 +1,17 @@
 """FastAPI composition root for the LTX backend server."""
 import os
+
+# Must be set before ANY torch/triton imports — torch reads these at import time.
+# TORCHINDUCTOR_DISABLE_CUDAGRAPHS: prevents the broken cudagraph capture that
+#   causes a float-where-int-expected Triton crash with torch.compile.
+# TORCH_COMPILE_DISABLE: falls back to eager execution globally, avoiding the
+#   broken kernel regardless of per-model compile settings.
+# PYTORCH_CUDA_ALLOC_CONF: expandable_segments reduces fragmentation OOM errors
+#   that occur when the allocator can't find a contiguous block.
+os.environ.setdefault("TORCHINDUCTOR_DISABLE_CUDAGRAPHS", "1")
+os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import sys
 from typing import Any, cast
 
@@ -17,6 +29,7 @@ if os.environ.get("BACKEND_DEBUG") == "1":
     except (ImportError, RuntimeError) as exc:
         print(f"Debugpy setup failed: {exc}", file=sys.stderr)
 
+import json
 import logging
 from pathlib import Path
 import threading
@@ -110,16 +123,9 @@ def _get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def _get_transformer_device() -> torch.device:
-    """If 2+ CUDA GPUs available, put the DiT transformer on cuda:1."""
-    if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
-        return torch.device("cuda:1")
-    return _get_device()
-
-
 DEVICE = _get_device()
-TRANSFORMER_DEVICE = _get_transformer_device()
 DTYPE = torch.bfloat16
+
 
 def _resolve_app_data_dir() -> Path:
     env_path = os.environ.get("LTX_APP_DATA_DIR")
@@ -151,6 +157,31 @@ logger.info(f"Models directory: {DEFAULT_MODELS_DIR}")
 SETTINGS_DIR = APP_DATA_DIR
 SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
+
+
+def _resolve_transformer_device(settings_file: Path, primary_device: torch.device) -> torch.device:
+    """Pre-read settings.json to resolve transformer device before services are built.
+
+    This ensures LTXTextEncoder is constructed with the correct device so that
+    API embeddings are placed on the same device as the transformer.
+    Accepts both snake_case keys (written by save_settings) and camelCase keys
+    (hand-edited files).
+    """
+    try:
+        if settings_file.exists():
+            with open(settings_file, "r", encoding="utf-8") as f:
+                data: Any = json.load(f)
+            if isinstance(data, dict):
+                d = cast(dict[str, object], data)
+                use_multi_gpu = bool(d.get("use_multi_gpu", d.get("useMultiGpu", False)))
+                if use_multi_gpu and torch.cuda.is_available() and torch.cuda.device_count() >= 2:
+                    return torch.device("cuda:1")
+    except Exception:
+        pass
+    return primary_device
+
+
+TRANSFORMER_DEVICE = _resolve_transformer_device(SETTINGS_FILE, DEVICE)
 
 DEFAULT_APP_SETTINGS = AppSettings()
 
@@ -265,7 +296,7 @@ def log_hardware_info() -> None:
     gpu_count = gpu.get_gpu_count()
 
     logger.info(f"Platform: {platform.system()} ({platform.machine()})")
-    logger.info(f"Primary device: {DEVICE}  |  Transformer device: {TRANSFORMER_DEVICE}  |  Dtype: {DTYPE}")
+    logger.info(f"Video device: {DEVICE}  |  Text encoder device: {TRANSFORMER_DEVICE}  |  Dtype: {DTYPE}")
     logger.info(f"GPU count: {gpu_count}  |  Per-device VRAM: {per_device} GB")
     logger.info(f"GPU[0]: {gpu_info['name']}  |  VRAM: {vram_gb} GB")
     logger.info(f"SageAttention: {'enabled' if use_sage_attention else 'disabled'}")

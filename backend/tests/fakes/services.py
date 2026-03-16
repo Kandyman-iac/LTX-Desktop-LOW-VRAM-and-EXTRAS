@@ -489,9 +489,16 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
         checkpoint_path: str,
         gemma_root: str | None,
         upsampler_path: str,
-        device: str | object,
+        device: object,
+        transformer_device: object = None,
+        block_swap_blocks_on_gpu: int = 0,
+        attention_tile_size: int = 0,
+        use_fp8_transformer: bool = False,
+        gguf_transformer_path: str = "",
     ) -> "FakeFastVideoPipeline":
         del checkpoint_path, gemma_root, upsampler_path, device
+        del transformer_device, block_swap_blocks_on_gpu, attention_tile_size
+        del use_fp8_transformer, gguf_transformer_path
         pipeline = FakeFastVideoPipeline._singleton
         if pipeline is None:
             raise RuntimeError("FakeFastVideoPipeline singleton is not bound")

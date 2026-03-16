@@ -85,6 +85,7 @@ class AppSettings(SettingsBaseModel):
     civitai_loras: str = "[]"
     gguf_transformer_path: str = ""
     use_abliterated_encoder: bool = False
+    use_multi_gpu: bool = False
 
     @field_validator("block_swap_blocks_on_gpu", mode="before")
     @classmethod
@@ -177,6 +178,7 @@ class SettingsResponse(SettingsBaseModel):
     civitai_loras: str = "[]"
     gguf_transformer_path: str = ""
     use_abliterated_encoder: bool = False
+    use_multi_gpu: bool = False
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:

@@ -1,4 +1,16 @@
-"""Text encoder patching and API embedding service."""
+"""Text encoder patching and API embedding service.
+
+Multi-GPU strategy (when transformer_device != device):
+  self.device           — video GPU (cuda:0): transformer, VAE, upsampler
+  self.transformer_device — text GPU (cuda:1): Gemma text encoder, resident permanently
+
+The text encoder is loaded onto the text GPU once and stays there.
+Encoded embeddings are transferred to the video GPU before the transformer
+consumes them, so no cross-device tensor errors occur during denoising.
+
+Single-GPU fallback: both self.device and self.transformer_device are cuda:0,
+the text encoder is loaded/offloaded as before.
+"""
 
 from __future__ import annotations
 
@@ -21,14 +33,31 @@ logger = logging.getLogger(__name__)
 
 
 class LTXTextEncoder:
-    """Stateless text encoding operations with idempotent monkey-patching."""
+    """Stateless text encoding operations with idempotent monkey-patching.
 
-    def __init__(self, device: torch.device, http: HTTPClient, ltx_api_base_url: str) -> None:
+    When transformer_device != device (multi-GPU):
+      - Text encoder lives permanently on transformer_device (cuda:1).
+      - Embeddings are transferred to device (cuda:0) for the transformer.
+
+    When transformer_device == device (single-GPU):
+      - Text encoder is loaded/offloaded on the single device as normal.
+    """
+
+    def __init__(self, device: torch.device, http: HTTPClient, ltx_api_base_url: str, transformer_device: torch.device | None = None) -> None:
+        # device           = video GPU — where transformer/VAE run
+        # transformer_device = text GPU — where Gemma lives permanently (multi-GPU)
         self.device = device
+        self.transformer_device = transformer_device or device
         self.http = http
         self.ltx_api_base_url = ltx_api_base_url
         self._model_ledger_patched = False
         self._encode_text_patched = False
+
+        if self.transformer_device != self.device:
+            logger.info(
+                "Multi-GPU text encoder: text_device=%s, video_device=%s",
+                self.transformer_device, self.device,
+            )
 
     def install_patches(self, state_getter: Callable[[], AppState]) -> None:
         self._install_model_ledger_patch(state_getter)
@@ -73,13 +102,12 @@ class LTXTextEncoder:
                     return DummyTextEncoder()
 
                 if te_state.cached_encoder is not None:
-                    try:
-                        te_state.cached_encoder.to(self.device)
-                        sync_device(self.device)
-                    except Exception:
-                        logger.warning("Failed to move cached text encoder to %s", self.device, exc_info=True)
+                    # Already resident on transformer_device — return as-is.
+                    # In multi-GPU mode the encoder never leaves this device.
                     return te_state.cached_encoder
 
+                # First call: load to CPU via ModelLedger default, then move
+                # permanently to transformer_device (text GPU in multi-GPU mode).
                 saved_device = self_model_ledger.device
                 self_model_ledger.device = torch.device("cpu")
                 try:
@@ -91,18 +119,19 @@ class LTXTextEncoder:
 
                 _quantize_linear_weights_fp8(te_state.cached_encoder)
 
-                te_state.cached_encoder.to(self.device)
-                sync_device(self.device)
+                te_state.cached_encoder.to(self.transformer_device)
+                sync_device(self.transformer_device)
+                logger.info("Text encoder loaded onto %s (permanent)", self.transformer_device)
                 return te_state.cached_encoder
 
             def patched_cleanup_memory() -> None:
-                state = state_getter()
-                te_state = state.text_encoder
-                if te_state is not None and te_state.cached_encoder is not None:
-                    try:
-                        te_state.cached_encoder.to(torch.device("cpu"))
-                    except Exception:
-                        logger.warning("Failed to move cached text encoder to CPU", exc_info=True)
+                # Multi-GPU: only flush the video device (self.device) — the text
+                # encoder on self.transformer_device is intentionally kept resident.
+                # Single-GPU: same behaviour as before (flush and free).
+                if self.transformer_device != self.device and torch.cuda.is_available():
+                    torch.cuda.synchronize(self.device)
+                    with torch.cuda.device(self.device):
+                        torch.cuda.empty_cache()
                 original_cleanup_memory()
 
             setattr(ModelLedger, "text_encoder", patched_text_encoder)
@@ -147,7 +176,9 @@ class LTXTextEncoder:
             ) -> list[tuple[torch.Tensor, TensorOrNone]]:
                 state = state_getter()
                 te_state = state.text_encoder
+
                 if te_state is not None and te_state.api_embeddings is not None:
+                    # API embeddings already on self.device (video GPU).
                     video_context = te_state.api_embeddings.video_context
                     audio_context = te_state.api_embeddings.audio_context
                     num_prompts = len(prompts) if not isinstance(prompts, str) else 1
@@ -162,10 +193,22 @@ class LTXTextEncoder:
                     return out
 
                 prompt_list = [prompts] if isinstance(prompts, str) else list(prompts)
-                return cast(
+                # Encoding runs on transformer_device (text GPU).
+                # Transfer results to device (video GPU) so the transformer
+                # never sees cross-device tensors.
+                result = cast(
                     list[tuple[torch.Tensor, TensorOrNone]],
                     original_encode_text(cast(Any, text_encoder), prompt_list, *args, **kwargs),
                 )
+                if self.transformer_device != self.device:
+                    result = [
+                        (
+                            v.to(self.device),
+                            a.to(self.device) if a is not None else None,
+                        )
+                        for v, a in result
+                    ]
+                return result
 
             setattr(text_enc_module, "encode_text", patched_encode_text)
             setattr(distilled_module, "encode_text", patched_encode_text)
@@ -185,7 +228,7 @@ class LTXTextEncoder:
                     logger.warning("Failed to patch encode_text for module %s", module_name, exc_info=True)
 
             self._encode_text_patched = True
-            logger.info("Installed encode_text API embeddings patch")
+            logger.info("Installed encode_text patch")
         except Exception as exc:
             logger.warning("Failed to patch encode_text: %s", exc, exc_info=True)
 

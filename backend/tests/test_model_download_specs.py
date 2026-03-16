@@ -23,9 +23,11 @@ from state.app_state_types import ModelFileType
 
 
 def _build_config(tmp_path):
+    import torch
+
     models_dir = tmp_path / "models"
     return RuntimeConfig(
-        device="cpu",
+        device=torch.device("cpu"),
         default_models_dir=models_dir,
         model_download_specs=DEFAULT_MODEL_DOWNLOAD_SPECS,
         required_model_types=DEFAULT_REQUIRED_MODEL_TYPES,
@@ -33,6 +35,8 @@ def _build_config(tmp_path):
         settings_file=tmp_path / "settings.json",
         ltx_api_base_url="https://api.ltx.video",
         force_api_generations=False,
+        text_encoder_device=torch.device("cpu"),
+        transformer_device=torch.device("cpu"),
         use_sage_attention=False,
         camera_motion_prompts={},
         default_negative_prompt="",

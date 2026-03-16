@@ -267,9 +267,10 @@ def build_default_service_bundle(config: RuntimeConfig) -> ServiceBundle:
         gpu_info=GpuInfoImpl(),
         video_processor=VideoProcessorImpl(),
         text_encoder=LTXTextEncoder(
-            device=config.device,
+            device=config.text_encoder_device,
             http=http,
             ltx_api_base_url=config.ltx_api_base_url,
+            transformer_device=config.transformer_device,
         ),
         task_runner=ThreadingRunner(),
         ltx_api_client=LTXAPIClientImpl(http=http, ltx_api_base_url=config.ltx_api_base_url),

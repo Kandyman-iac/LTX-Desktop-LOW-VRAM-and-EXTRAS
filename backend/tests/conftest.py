@@ -49,8 +49,10 @@ def test_state(tmp_path: Path, fake_services: FakeServices):
     for directory in (default_models_dir, outputs_dir, app_data):
         directory.mkdir(parents=True, exist_ok=True)
 
+    import torch
+
     config = RuntimeConfig(
-        device="cpu",
+        device=torch.device("cpu"),
         default_models_dir=default_models_dir,
         model_download_specs=DEFAULT_MODEL_DOWNLOAD_SPECS,
         required_model_types=DEFAULT_REQUIRED_MODEL_TYPES,
@@ -58,6 +60,8 @@ def test_state(tmp_path: Path, fake_services: FakeServices):
         settings_file=app_data / "settings.json",
         ltx_api_base_url="https://api.ltx.video",
         force_api_generations=False,
+        text_encoder_device=torch.device("cpu"),
+        transformer_device=torch.device("cpu"),
         use_sage_attention=False,
         camera_motion_prompts=CAMERA_MOTION_PROMPTS,
         default_negative_prompt=DEFAULT_NEGATIVE_PROMPT,
