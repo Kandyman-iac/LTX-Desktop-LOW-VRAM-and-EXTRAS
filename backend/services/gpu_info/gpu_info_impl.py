@@ -26,7 +26,6 @@ class GpuInfoImpl:
     def _get_macos_chip_name(self) -> str | None:
         if platform.system() != "Darwin":
             return None
-
         try:
             result = subprocess.run(
                 ["sysctl", "-n", "machdep.cpu.brand_string"],
@@ -49,6 +48,15 @@ class GpuInfoImpl:
         except Exception:
             logger.warning("Failed to query system RAM", exc_info=True)
             return 0
+
+    def get_gpu_count(self) -> int:
+        """Return number of available CUDA devices."""
+        try:
+            if torch.cuda.is_available():
+                return int(torch.cuda.device_count())
+        except Exception:
+            logger.warning("Failed to query CUDA device count", exc_info=True)
+        return 0
 
     def get_gpu_info(self) -> GpuTelemetryPayload:
         if self.get_cuda_available():
@@ -119,6 +127,7 @@ class GpuInfoImpl:
         return None
 
     def get_vram_total_gb(self) -> int | None:
+        """VRAM for device 0 only. Use get_all_vram_total_gb() for multi-GPU."""
         if self.get_cuda_available():
             try:
                 properties = cast(
@@ -140,3 +149,36 @@ class GpuInfoImpl:
                 return None
 
         return None
+
+    def get_all_vram_total_gb(self) -> int | None:
+        """Sum of VRAM across all CUDA devices. Returns None if CUDA unavailable."""
+        if not self.get_cuda_available():
+            return None
+        try:
+            total = 0
+            for i in range(torch.cuda.device_count()):
+                props = cast(
+                    _CudaDeviceProperties,
+                    torch.cuda.get_device_properties(i),  # type: ignore[reportUnknownMemberType]
+                )
+                total += int(props.total_memory // (1024**3))
+            return total if total > 0 else None
+        except Exception:
+            logger.warning("Failed to query total VRAM across all GPUs", exc_info=True)
+            return None
+
+    def get_per_device_vram_gb(self) -> list[int]:
+        """VRAM in GB for each CUDA device, ordered by device index."""
+        if not self.get_cuda_available():
+            return []
+        result: list[int] = []
+        try:
+            for i in range(torch.cuda.device_count()):
+                props = cast(
+                    _CudaDeviceProperties,
+                    torch.cuda.get_device_properties(i),  # type: ignore[reportUnknownMemberType]
+                )
+                result.append(int(props.total_memory // (1024**3)))
+        except Exception:
+            logger.warning("Failed to query per-device VRAM", exc_info=True)
+        return result

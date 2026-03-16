@@ -104,14 +104,21 @@ PORT = 0
 
 def _get_device() -> torch.device:
     if torch.cuda.is_available():
-        return torch.device("cuda")
+        return torch.device("cuda:0")
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
 
 
+def _get_transformer_device() -> torch.device:
+    """If 2+ CUDA GPUs available, put the DiT transformer on cuda:1."""
+    if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
+        return torch.device("cuda:1")
+    return _get_device()
+
+
 DEVICE = _get_device()
-DTYPE = torch.bfloat16
+TRANSFORMER_DEVICE = _get_transformer_device()
 
 def _resolve_app_data_dir() -> Path:
     env_path = os.environ.get("LTX_APP_DATA_DIR")
@@ -164,22 +171,25 @@ def _resolve_force_api_generations() -> bool:
     system = platform.system()
     cuda_available = gpu_info.get_cuda_available()
     vram_gb = gpu_info.get_vram_total_gb()
+    total_vram_gb = gpu_info.get_all_vram_total_gb()
 
-    # Server-owned source of truth for mode selection.
     force_api_generations = decide_force_api_generations(
         system=system,
         cuda_available=cuda_available,
         vram_gb=vram_gb,
+        total_vram_gb=total_vram_gb,
     )
     logger.info(
-        "Runtime policy force_api_generations=%s (system=%s cuda_available=%s vram_gb=%s)",
+        "Runtime policy force_api_generations=%s "
+        "(system=%s cuda_available=%s vram_gb=%s total_vram_gb=%s gpu_count=%s)",
         force_api_generations,
         system,
         cuda_available,
         vram_gb,
+        total_vram_gb,
+        gpu_info.get_gpu_count(),
     )
     return force_api_generations
-
 
 FORCE_API_GENERATIONS = _resolve_force_api_generations()
 REQUIRED_MODEL_TYPES: frozenset[ModelFileType] = (
@@ -248,10 +258,13 @@ def log_hardware_info() -> None:
     gpu = GpuInfoImpl()
     gpu_info = gpu.get_gpu_info()
     vram_gb = gpu_info["vram"] // 1024 if gpu_info["vram"] else 0
+    per_device = gpu.get_per_device_vram_gb()
+    gpu_count = gpu.get_gpu_count()
 
     logger.info(f"Platform: {platform.system()} ({platform.machine()})")
-    logger.info(f"Device: {DEVICE}  |  Dtype: {DTYPE}")
-    logger.info(f"GPU: {gpu_info['name']}  |  VRAM: {vram_gb} GB")
+    logger.info(f"Primary device: {DEVICE}  |  Transformer device: {TRANSFORMER_DEVICE}  |  Dtype: {DTYPE}")
+    logger.info(f"GPU count: {gpu_count}  |  Per-device VRAM: {per_device} GB")
+    logger.info(f"GPU[0]: {gpu_info['name']}  |  VRAM: {vram_gb} GB")
     logger.info(f"SageAttention: {'enabled' if use_sage_attention else 'disabled'}")
     logger.info(f"Python: {sys.version.split()[0]}  |  Torch: {torch.__version__}")
 
