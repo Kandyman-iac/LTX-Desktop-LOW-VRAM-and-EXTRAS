@@ -3,7 +3,7 @@ import path from 'path'
 import os from 'os'
 import { getProjectAssetsPath } from './app-state'
 
-export const isDev = !app.isPackaged
+export const isDev = !app.isPackaged && process.env.ELECTRON_IS_DEV !== '0'
 
 // Get directory - works in both CJS and ESM contexts
 export function getCurrentDir(): string {

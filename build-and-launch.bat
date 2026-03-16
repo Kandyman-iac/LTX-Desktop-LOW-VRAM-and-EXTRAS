@@ -8,4 +8,5 @@ if errorlevel 1 (
     exit /b 1
 )
 echo Launching...
+set ELECTRON_IS_DEV=0
 npx electron .
