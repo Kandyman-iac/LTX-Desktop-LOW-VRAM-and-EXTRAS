@@ -8,6 +8,7 @@ export interface InferenceSettings {
 
 export interface FastModelSettings {
   useUpscaler: boolean
+  steps: number
 }
 
 export interface AppSettings {
@@ -26,6 +27,16 @@ export interface AppSettings {
   seedLocked: boolean
   lockedSeed: number
   modelsDir: string
+  // VRAM optimisation settings
+  blockSwapBlocksOnGpu: number
+  useFp8Transformer: boolean
+  attentionTileSize: number
+  textEncoderDevice: string
+  transformerDevice: string
+  useMultiGpu: boolean
+  ggufTransformerPath: string
+  useAbliteratedEncoder: boolean
+  civitaiLoras: string
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -36,7 +47,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   hasFalApiKey: false,
   hasGeminiApiKey: false,
   useLocalTextEncoder: false,
-  fastModel: { useUpscaler: true },
+  fastModel: { useUpscaler: true, steps: 8 },
   proModel: { steps: 20, useUpscaler: true },
   promptCacheSize: 1,
   promptEnhancerEnabledT2V: false,
@@ -44,6 +55,15 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   seedLocked: false,
   lockedSeed: 42,
   modelsDir: '',
+  blockSwapBlocksOnGpu: 0,
+  useFp8Transformer: false,
+  attentionTileSize: 0,
+  textEncoderDevice: '',
+  transformerDevice: '',
+  useMultiGpu: false,
+  ggufTransformerPath: '',
+  useAbliteratedEncoder: false,
+  civitaiLoras: '[]',
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -92,6 +112,15 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     seedLocked: data.seedLocked ?? DEFAULT_APP_SETTINGS.seedLocked,
     lockedSeed: data.lockedSeed ?? DEFAULT_APP_SETTINGS.lockedSeed,
     modelsDir: data.modelsDir ?? DEFAULT_APP_SETTINGS.modelsDir,
+    blockSwapBlocksOnGpu: data.blockSwapBlocksOnGpu ?? DEFAULT_APP_SETTINGS.blockSwapBlocksOnGpu,
+    useFp8Transformer: data.useFp8Transformer ?? DEFAULT_APP_SETTINGS.useFp8Transformer,
+    attentionTileSize: data.attentionTileSize ?? DEFAULT_APP_SETTINGS.attentionTileSize,
+    textEncoderDevice: data.textEncoderDevice ?? DEFAULT_APP_SETTINGS.textEncoderDevice,
+    transformerDevice: data.transformerDevice ?? DEFAULT_APP_SETTINGS.transformerDevice,
+    useMultiGpu: data.useMultiGpu ?? DEFAULT_APP_SETTINGS.useMultiGpu,
+    ggufTransformerPath: data.ggufTransformerPath ?? DEFAULT_APP_SETTINGS.ggufTransformerPath,
+    useAbliteratedEncoder: data.useAbliteratedEncoder ?? DEFAULT_APP_SETTINGS.useAbliteratedEncoder,
+    civitaiLoras: data.civitaiLoras ?? DEFAULT_APP_SETTINGS.civitaiLoras,
   }
 }
 

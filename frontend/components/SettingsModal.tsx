@@ -200,6 +200,16 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     })
   }
 
+  const handleBlockSwapChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Math.max(0, Math.min(48, parseInt(e.target.value) || 0))
+    onSettingsChange({ ...settings, blockSwapBlocksOnGpu: v })
+  }
+
+  const handleAttentionTileSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Math.max(0, Math.min(16384, parseInt(e.target.value) || 0))
+    onSettingsChange({ ...settings, attentionTileSize: v })
+  }
+
   // Prompt Enhancer handlers
   const handleTogglePromptEnhancer = (mode: 't2v' | 'i2v') => {
     if (mode === 't2v') {
@@ -1044,6 +1054,155 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   <span className="text-blue-400 font-medium">Tip:</span> Lower steps = faster but lower quality.
                   Higher steps = better quality but slower.
                 </p>
+              </div>
+
+              {/* VRAM Optimisations */}
+              <div className="space-y-4 pt-4 border-t border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <svg className="h-4 w-4 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="7" width="20" height="10" rx="2" />
+                    <path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />
+                    <circle cx="12" cy="12" r="1" fill="currentColor" />
+                  </svg>
+                  <h3 className="text-sm font-semibold text-white">VRAM Optimisations</h3>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">Advanced</span>
+                </div>
+
+                <p className="text-xs text-zinc-500 leading-relaxed">
+                  Settings to reduce VRAM usage and enable longer generations. Requires app restart to take effect.
+                </p>
+
+                <div className="bg-zinc-800/50 rounded-lg p-4 space-y-4">
+                  {/* Multi-GPU */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">Multi-GPU</label>
+                      <p className="text-xs text-zinc-500">Transformer on cuda:0, text encoder on cuda:1</p>
+                    </div>
+                    <button
+                      onClick={() => onSettingsChange({ ...settings, useMultiGpu: !settings.useMultiGpu })}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        settings.useMultiGpu ? 'bg-amber-500' : 'bg-zinc-700'
+                      }`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.useMultiGpu ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* FP8 Transformer */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">FP8 Transformer</label>
+                      <p className="text-xs text-zinc-500">Force FP8 quantisation (auto-enabled on supported GPUs)</p>
+                    </div>
+                    <button
+                      onClick={() => onSettingsChange({ ...settings, useFp8Transformer: !settings.useFp8Transformer })}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        settings.useFp8Transformer ? 'bg-amber-500' : 'bg-zinc-700'
+                      }`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.useFp8Transformer ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* Block Swap */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">Block Swap (blocks on GPU)</label>
+                      <p className="text-xs text-zinc-500">0 = disabled, max 48. Offloads transformer blocks to CPU RAM</p>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max="48"
+                      value={settings.blockSwapBlocksOnGpu ?? 0}
+                      onChange={handleBlockSwapChange}
+                      className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  {/* Attention Tiling */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">Attention Tile Size</label>
+                      <p className="text-xs text-zinc-500">0 = disabled. Enables long videos (try 512–2048). Lower = less VRAM</p>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max="16384"
+                      step="64"
+                      value={settings.attentionTileSize ?? 0}
+                      onChange={handleAttentionTileSizeChange}
+                      className="w-24 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  {/* Abliterated Encoder */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">Abliterated Text Encoder</label>
+                      <p className="text-xs text-zinc-500">Use refusal-direction-removed Gemma encoder</p>
+                    </div>
+                    <button
+                      onClick={() => onSettingsChange({ ...settings, useAbliteratedEncoder: !settings.useAbliteratedEncoder })}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        settings.useAbliteratedEncoder ? 'bg-amber-500' : 'bg-zinc-700'
+                      }`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.useAbliteratedEncoder ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* GGUF Path */}
+                  <div className="space-y-1.5">
+                    <label className="text-sm text-white">GGUF Transformer Path</label>
+                    <p className="text-xs text-zinc-500">Optional path to a GGUF transformer file (leave blank to use default)</p>
+                    <input
+                      type="text"
+                      value={settings.ggufTransformerPath ?? ''}
+                      onChange={(e) => onSettingsChange({ ...settings, ggufTransformerPath: e.target.value })}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      placeholder="e.g. C:\models\transformer.gguf"
+                      className="w-full px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Device overrides */}
+                <div className="bg-zinc-800/30 rounded-lg p-3 space-y-3">
+                  <p className="text-xs text-zinc-400 font-medium">Device Overrides <span className="text-zinc-600 font-normal">(expert, blank = auto)</span></p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-xs text-zinc-400">Transformer Device</label>
+                      <input
+                        type="text"
+                        value={settings.transformerDevice ?? ''}
+                        onChange={(e) => onSettingsChange({ ...settings, transformerDevice: e.target.value })}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        placeholder="cuda:0"
+                        className="w-full px-2 py-1 bg-zinc-700 border border-zinc-700 rounded text-xs text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-zinc-400">Text Encoder Device</label>
+                      <input
+                        type="text"
+                        value={settings.textEncoderDevice ?? ''}
+                        onChange={(e) => onSettingsChange({ ...settings, textEncoderDevice: e.target.value })}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        placeholder="cuda:1"
+                        className="w-full px-2 py-1 bg-zinc-700 border border-zinc-700 rounded text-xs text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           )}
