@@ -1,16 +1,11 @@
 """Runtime configuration model."""
-
 from __future__ import annotations
-
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-
 import torch
-
 from runtime_config.model_download_specs import ModelFileDownloadSpec
 from state.app_state_types import ModelFileType
-
 
 @dataclass
 class RuntimeConfig:
@@ -22,6 +17,8 @@ class RuntimeConfig:
     settings_file: Path
     ltx_api_base_url: str
     force_api_generations: bool
+    text_encoder_device: torch.device
+    transformer_device: torch.device
     use_sage_attention: bool
     camera_motion_prompts: dict[str, str]
     default_negative_prompt: str

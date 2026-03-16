@@ -119,6 +119,7 @@ def _get_transformer_device() -> torch.device:
 
 DEVICE = _get_device()
 TRANSFORMER_DEVICE = _get_transformer_device()
+DTYPE = torch.bfloat16
 
 def _resolve_app_data_dir() -> Path:
     env_path = os.environ.get("LTX_APP_DATA_DIR")
@@ -219,6 +220,8 @@ runtime_config = RuntimeConfig(
     settings_file=SETTINGS_FILE,
     ltx_api_base_url=LTX_API_BASE_URL,
     force_api_generations=FORCE_API_GENERATIONS,
+    text_encoder_device=DEVICE,
+    transformer_device=TRANSFORMER_DEVICE,
     use_sage_attention=use_sage_attention,
     camera_motion_prompts=CAMERA_MOTION_PROMPTS,
     default_negative_prompt=DEFAULT_NEGATIVE_PROMPT,
