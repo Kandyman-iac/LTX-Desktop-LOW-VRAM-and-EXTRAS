@@ -256,23 +256,24 @@ class LTXTextEncoder:
                     for v, a in result
                 ]
 
-                # Single-GPU only: encoder ran on CPU. Cache the first result in
-                # api_embeddings so the pipeline uses DummyTextEncoder on the next
-                # generation with the same prompt — skipping CPU encode entirely.
+                # Cache the first result so the pipeline uses DummyTextEncoder on
+                # the next generation with the same prompt — skipping encode entirely.
+                # Works for both single-GPU (CPU encoder) and multi-GPU (cuda:1 encoder).
+                # Embeddings are already on self.device (cuda:0) at this point.
+                if te_state is not None and te_state.api_embeddings is None and len(result) > 0:
+                    from state.app_state_types import TextEncodingResult
+                    v, a = result[0]
+                    encoded = TextEncodingResult(video_context=v, audio_context=a)
+                    te_state.api_embeddings = encoded
+                    te_state.prompt_cache[(original_prompt_key, enhance_locally)] = encoded
+                    logger.info(
+                        "Text encoder result cached%s — subsequent generations will skip encode",
+                        " (enhanced)" if enhance_locally else "",
+                    )
+
+                # Single-GPU only: optionally free the encoder from CPU RAM.
+                # In multi-GPU mode the encoder stays resident on cuda:1.
                 if not _is_multi_gpu(state) and te_state is not None:
-                    if te_state.api_embeddings is None and len(result) > 0:
-                        from state.app_state_types import TextEncodingResult
-                        v, a = result[0]
-                        encoded = TextEncodingResult(video_context=v, audio_context=a)
-                        te_state.api_embeddings = encoded
-                        # Cache under original prompt + enhance_locally flag so
-                        # text_handler can serve it as api_embeddings on the next
-                        # generation with the same prompt (DummyTextEncoder path).
-                        te_state.prompt_cache[(original_prompt_key, enhance_locally)] = encoded
-                        logger.info(
-                            "Text encoder result cached%s (subsequent generations will skip CPU encode)",
-                            " (enhanced)" if enhance_locally else "",
-                        )
                     if state.app_settings.unload_text_encoder_after_encode:
                         te_state.cached_encoder = None
                         gc.collect()
