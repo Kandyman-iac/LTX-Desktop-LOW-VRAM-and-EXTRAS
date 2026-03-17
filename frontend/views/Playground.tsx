@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film } from 'lucide-react'
+import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film, CheckCircle, Cpu, AlertCircle } from 'lucide-react'
 import { logger } from '../lib/logger'
 import { ImageUploader } from '../components/ImageUploader'
 import { AudioUploader } from '../components/AudioUploader'
@@ -22,6 +22,7 @@ import { sanitizeForcedApiVideoSettings } from '../lib/api-video-options'
 import { RetakePanel } from '../components/RetakePanel'
 import { ICLoraPanel, CONDITIONING_TYPES, type ICLoraConditioningType } from '../components/ICLoraPanel'
 import { useGenerationHistory, type HistoryEntry } from '../hooks/use-generation-history'
+import { useEncodePrompt } from '../hooks/use-encode-prompt'
 import { OutputBrowser } from '../components/OutputBrowser'
 
 const DEFAULT_SETTINGS: GenerationSettings = {
@@ -41,7 +42,7 @@ const DEFAULT_SETTINGS: GenerationSettings = {
 
 export function Playground() {
   const { goHome } = useProjects()
-  const { forceApiGenerations, shouldVideoGenerateWithLtxApi } = useAppSettings()
+  const { forceApiGenerations, shouldVideoGenerateWithLtxApi, settings: appSettings } = useAppSettings()
   const [mode, setMode] = useState<GenerationMode>('text-to-video')
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
@@ -55,6 +56,14 @@ export function Playground() {
   const historyEntries = useMemo(() => (showHistory ? getHistory() : []), [showHistory, getHistory])
 
   const { status, processStatus } = useBackend()
+  const { isEncoding, encodedPrompt, encodeError, encodePrompt, clearEncoded } = useEncodePrompt()
+
+  // Determine whether the manual Encode Prompt workflow is relevant.
+  // Only shown for single-GPU + local encoder (multi-GPU handles it automatically).
+  const showEncodeButton = appSettings.useLocalTextEncoder && !appSettings.useMultiGpu
+
+  // Track whether the current prompt differs from the last encoded one.
+  const isPromptChanged = showEncodeButton && encodedPrompt !== null && prompt.trim() !== encodedPrompt
 
   useEffect(() => {
     if (!shouldVideoGenerateWithLtxApi || mode === 'text-to-image') return
@@ -207,6 +216,7 @@ export function Playground() {
   }
 
   const handleClearAll = () => {
+    clearEncoded()
     setPrompt('')
     setNegativePrompt('')
     setSelectedImage(null)
@@ -443,6 +453,61 @@ export function Playground() {
                 maxChars={5000}
                 disabled={isBusy}
               />
+
+              {/* Encode Prompt button — single-GPU + local encoder only */}
+              {showEncodeButton && (
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={() => encodePrompt(prompt)}
+                    disabled={isEncoding || isBusy || !prompt.trim() || processStatus !== 'alive'}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isEncoding
+                        ? 'bg-zinc-700 text-zinc-300'
+                        : encodedPrompt && !isPromptChanged
+                        ? 'bg-emerald-800/60 text-emerald-300 hover:bg-emerald-800'
+                        : isPromptChanged
+                        ? 'bg-amber-800/60 text-amber-300 hover:bg-amber-800'
+                        : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                    }`}
+                    title={
+                      isEncoding
+                        ? 'Encoding prompt on GPU…'
+                        : encodedPrompt && !isPromptChanged
+                        ? 'Prompt encoded — click to re-encode'
+                        : isPromptChanged
+                        ? 'Prompt changed — click to re-encode on GPU'
+                        : 'Encode prompt on GPU (ejects video model temporarily)'
+                    }
+                  >
+                    {isEncoding ? (
+                      <>
+                        <Cpu className="h-3.5 w-3.5 animate-pulse" />
+                        Encoding…
+                      </>
+                    ) : encodedPrompt && !isPromptChanged ? (
+                      <>
+                        <CheckCircle className="h-3.5 w-3.5" />
+                        Encoded
+                      </>
+                    ) : isPromptChanged ? (
+                      <>
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        Re-encode prompt
+                      </>
+                    ) : (
+                      <>
+                        <Cpu className="h-3.5 w-3.5" />
+                        Encode prompt
+                      </>
+                    )}
+                  </button>
+                  {encodeError && (
+                    <span className="text-xs text-red-400 truncate" title={encodeError}>
+                      {encodeError}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Negative prompt */}
               <div className="mt-2">

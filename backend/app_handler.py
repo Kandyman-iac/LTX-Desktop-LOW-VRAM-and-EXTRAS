@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from state.app_settings import AppSettings
 from handlers import (
     DownloadHandler,
+    EncodePromptHandler,
     GenerationHandler,
     HealthHandler,
     IcLoraHandler,
@@ -193,6 +194,14 @@ class AppHandler:
             lock=self._lock,
             config=config,
             http=http,
+        )
+
+        self.encode_prompt = EncodePromptHandler(
+            state=self.state,
+            lock=self._lock,
+            config=config,
+            pipelines_handler=self.pipelines,
+            text_handler=self.text,
         )
 
         self.retake = RetakeHandler(

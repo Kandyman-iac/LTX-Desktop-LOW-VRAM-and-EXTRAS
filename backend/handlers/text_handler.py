@@ -86,7 +86,20 @@ class TextHandler(StateHandlerBase):
 
         use_local = self.should_use_local_encoding()
         gemma_root = self.resolve_gemma_root()
+
+        # Handle API path first — clears api_embeddings when use_local=True.
         embeddings = self._prepare_api_embeddings(prompt, enhance_prompt)
+
+        # Local encoding: check if this prompt was previously GPU-encoded and cached.
+        # Must come AFTER _prepare_api_embeddings (which clears api_embeddings for local path).
+        # If found, set api_embeddings so the pipeline uses DummyTextEncoder and skips
+        # the CPU encode entirely (key uses False since local encode never does enhancement).
+        if use_local:
+            cached = self._get_cached_prompt(prompt, False)
+            if cached is not None:
+                self._set_api_embeddings(cached)
+            else:
+                self.clear_api_embeddings()
 
         if not use_local and embeddings is None and gemma_root is None:
             raise RuntimeError(

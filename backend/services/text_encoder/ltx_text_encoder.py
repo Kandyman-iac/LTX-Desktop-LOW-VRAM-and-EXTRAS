@@ -104,12 +104,8 @@ class LTXTextEncoder:
 
                 if te_state.cached_encoder is not None:
                     # Already loaded. Multi-GPU: encoder stays on transformer_device.
-                    # Single-GPU: encoder is on CPU between generations — move to
-                    # self.device now so encode_text runs on GPU, not CPU.
-                    if self.transformer_device == self.device:
-                        te_state.cached_encoder.to(self.device)
-                        sync_device(self.device)
-                        logger.info("Text encoder moved to %s for encoding (single-GPU mode)", self.device)
+                    # Single-GPU: encoder stays on CPU — transformer already fills VRAM,
+                    # so moving Gemma to GPU would OOM. encode_text runs on CPU.
                     return te_state.cached_encoder
 
                 # First call: load to CPU via ModelLedger default, then move
@@ -131,11 +127,11 @@ class LTXTextEncoder:
                     sync_device(self.transformer_device)
                     logger.info("Text encoder loaded onto %s (permanent)", self.transformer_device)
                 else:
-                    # Single-GPU: move to GPU for encoding, will be returned to CPU
-                    # (or unloaded) in patched_encode_text after embeddings are ready.
-                    te_state.cached_encoder.to(self.device)
-                    sync_device(self.device)
-                    logger.info("Text encoder moved to %s for encoding (single-GPU mode)", self.device)
+                    # Single-GPU: keep on CPU. The transformer already occupies all
+                    # VRAM by the time model_ledger.text_encoder() is called inside
+                    # the pipeline. encode_text will run on CPU (slow first time,
+                    # cached in api_embeddings for subsequent generations).
+                    logger.info("Text encoder loaded to CPU (single-GPU mode — GPU full)")
                 return te_state.cached_encoder
 
             def patched_cleanup_memory() -> None:
@@ -158,7 +154,6 @@ class LTXTextEncoder:
                 "ltx_pipelines.ic_lora",
                 "ltx_pipelines.a2vid_two_stage",
                 "ltx_pipelines.retake",
-                "ltx_pipelines.retake_pipeline",
             ):
                 try:
                     module = __import__(module_name, fromlist=["cleanup_memory"])
@@ -224,17 +219,24 @@ class LTXTextEncoder:
                     for v, a in result
                 ]
 
-                # Single-GPU only: return encoder to CPU RAM after encoding so the
-                # transformer gets full VRAM. Optionally unload entirely to free ~9GB
-                # system RAM before the VAE runs (at cost of reload next generation).
-                if self.transformer_device == self.device and te_state is not None and te_state.cached_encoder is not None:
+                # Single-GPU only: encoder ran on CPU. Cache the first result in
+                # api_embeddings so the pipeline uses DummyTextEncoder on the next
+                # generation with the same prompt — skipping CPU encode entirely.
+                if self.transformer_device == self.device and te_state is not None:
+                    if te_state.api_embeddings is None and len(result) > 0:
+                        from state.app_state_types import TextEncodingResult
+                        v, a = result[0]
+                        encoded = TextEncodingResult(video_context=v, audio_context=a)
+                        te_state.api_embeddings = encoded
+                        # Also write to prompt_cache so text_handler can serve it
+                        # as api_embeddings on the next generation (DummyTextEncoder path).
+                        prompt_key = prompt_list[0].strip() if prompt_list else ""
+                        te_state.prompt_cache[(prompt_key, False)] = encoded
+                        logger.info("Text encoder result cached (subsequent generations will skip CPU encode)")
                     if state.app_settings.unload_text_encoder_after_encode:
                         te_state.cached_encoder = None
                         gc.collect()
                         logger.info("Text encoder unloaded from CPU RAM (low-memory mode)")
-                    else:
-                        te_state.cached_encoder.to("cpu")
-                        logger.info("Text encoder returned to CPU (single-GPU mode)")
 
                 return result
 
@@ -247,7 +249,6 @@ class LTXTextEncoder:
                 "ltx_pipelines.ic_lora",
                 "ltx_pipelines.a2vid_two_stage",
                 "ltx_pipelines.retake",
-                "ltx_pipelines.retake_pipeline",
             ):
                 try:
                     module = __import__(module_name, fromlist=["encode_text"])

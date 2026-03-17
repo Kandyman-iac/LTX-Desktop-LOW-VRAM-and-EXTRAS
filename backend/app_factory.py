@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response as StarletteResponse
 
 from _routes._errors import HTTPError
+from _routes.encode_prompt import router as encode_prompt_router
 from _routes.generation import router as generation_router
 from _routes.health import router as health_router
 from _routes.ic_lora import router as ic_lora_router
@@ -109,6 +110,7 @@ def create_app(
     app.add_exception_handler(Exception, _route_generic_error_handler)
 
     app.include_router(health_router)
+    app.include_router(encode_prompt_router)
     app.include_router(generation_router)
     app.include_router(models_router)
     app.include_router(settings_router)
