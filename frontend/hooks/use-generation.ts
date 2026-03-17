@@ -14,6 +14,7 @@ interface GenerationState {
   imageUrls: string[]  // For multiple image variations
   imagePaths: string[]  // Original file paths for all images
   error: string | null
+  enhancedPrompt: string | null
 }
 
 interface GenerationProgress {
@@ -22,6 +23,7 @@ interface GenerationProgress {
   progress: number
   currentStep: number | null
   totalSteps: number | null
+  enhancedPrompt: string | null
 }
 
 export interface GenerationSuccessInfo {
@@ -115,6 +117,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
     imageUrls: [],
     imagePaths: [],
     error: null,
+    enhancedPrompt: null,
   })
 
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -208,11 +211,12 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
             }
             
             lastPhase = data.phase
-            
+
             setState(prev => ({
               ...prev,
               progress: displayProgress,
               statusMessage,
+              ...(data.enhancedPrompt != null ? { enhancedPrompt: data.enhancedPrompt } : {}),
             }))
           }
         } catch {
@@ -493,6 +497,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       imageUrls: [],
       imagePaths: [],
       error: null,
+      enhancedPrompt: null,
     })
   }, [])
 

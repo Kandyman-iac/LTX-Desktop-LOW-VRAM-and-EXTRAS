@@ -106,6 +106,7 @@ class GenerationProgressResponse(BaseModel):
     progress: int
     currentStep: int | None
     totalSteps: int | None
+    enhancedPrompt: str | None = None
 
 
 class ModelInfo(BaseModel):

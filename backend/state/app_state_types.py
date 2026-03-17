@@ -83,6 +83,8 @@ class TextEncoderState:
     cached_encoder: CachedTextEncoder | None = None
     # Tracks which prompt was last manually GPU-encoded (for status reporting).
     encoded_prompt: str | None = None
+    # Stores the Gemma-enhanced prompt from the last local-enhance run.
+    last_enhanced_prompt: str | None = None
 
 
 # ============================================================

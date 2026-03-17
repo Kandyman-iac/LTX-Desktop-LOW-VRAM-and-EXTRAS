@@ -236,6 +236,8 @@ class LTXTextEncoder:
                             enhanced[:60],
                         )
                         prompt_list = [enhanced] + prompt_list[1:]
+                        if te_state is not None:
+                            te_state.last_enhanced_prompt = enhanced
                     except Exception as exc:
                         logger.warning("Local prompt enhancement failed, using original: %s", exc)
 

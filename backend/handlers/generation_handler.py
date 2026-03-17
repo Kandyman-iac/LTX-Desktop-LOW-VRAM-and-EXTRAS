@@ -206,6 +206,8 @@ class GenerationHandler(StateHandlerBase):
     @with_state_lock
     def get_generation_progress(self) -> GenerationProgressResponse:
         gen = self._generation_for_polling()
+        te = self.state.text_encoder
+        enhanced_prompt = te.last_enhanced_prompt if te is not None else None
 
         match gen:
             case GenerationRunning(progress=progress):
@@ -215,6 +217,7 @@ class GenerationHandler(StateHandlerBase):
                     progress=int(progress.progress),
                     currentStep=progress.current_step,
                     totalSteps=progress.total_steps,
+                    enhancedPrompt=enhanced_prompt,
                 )
             case GenerationComplete():
                 return GenerationProgressResponse(
@@ -223,6 +226,7 @@ class GenerationHandler(StateHandlerBase):
                     progress=100,
                     currentStep=0,
                     totalSteps=0,
+                    enhancedPrompt=enhanced_prompt,
                 )
             case GenerationCancelled():
                 return GenerationProgressResponse(

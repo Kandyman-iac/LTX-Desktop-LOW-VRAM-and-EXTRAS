@@ -918,6 +918,7 @@ export function GenSpace() {
     imagePaths,
     error,
     reset,
+    enhancedPrompt,
   } = useGeneration()
 
   const {
@@ -1577,6 +1578,12 @@ export function GenSpace() {
                     {progress > 0 && (
                       <div className="w-32 h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
                         <div className="h-full bg-violet-500 transition-all" style={{ width: `${progress}%` }} />
+                      </div>
+                    )}
+                    {enhancedPrompt && (
+                      <div className="mt-3 mx-4 px-3 py-2 bg-zinc-900/80 border border-purple-500/20 rounded-lg max-w-xs">
+                        <p className="text-[10px] text-purple-400 font-medium mb-1">Enhanced prompt</p>
+                        <p className="text-[10px] text-zinc-400 leading-relaxed line-clamp-4">{enhancedPrompt}</p>
                       </div>
                     )}
                   </div>
