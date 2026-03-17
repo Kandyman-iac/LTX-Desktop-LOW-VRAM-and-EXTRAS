@@ -93,6 +93,13 @@ class LTXTextEncoder:
 
                     child.forward = _make_upcast_forward(child)  # type: ignore[assignment]
 
+            def _is_multi_gpu(state: AppState) -> bool:
+                return (
+                    getattr(state.app_settings, "use_multi_gpu", False)
+                    and torch.cuda.is_available()
+                    and torch.cuda.device_count() >= 2
+                )
+
             def patched_text_encoder(self_model_ledger: ModelLedger) -> object:
                 state = state_getter()
                 te_state = state.text_encoder
@@ -102,14 +109,27 @@ class LTXTextEncoder:
                 if te_state.api_embeddings is not None:
                     return DummyTextEncoder()
 
+                # Resolve text encoder device from current settings — NOT from
+                # startup config (which hardcodes cuda:0 for transformer_device).
+                multi_gpu = _is_multi_gpu(state)
+                text_device = torch.device("cuda:1") if multi_gpu else None
+
                 if te_state.cached_encoder is not None:
-                    # Already loaded. Multi-GPU: encoder stays on transformer_device.
-                    # Single-GPU: encoder stays on CPU — transformer already fills VRAM,
-                    # so moving Gemma to GPU would OOM. encode_text runs on CPU.
+                    # Already loaded. If mode switched (e.g. single→multi-GPU),
+                    # move the encoder to the correct device without reloading.
+                    if multi_gpu and text_device is not None:
+                        try:
+                            current = next(iter(te_state.cached_encoder.parameters())).device
+                            if current != text_device:
+                                te_state.cached_encoder.to(text_device)
+                                sync_device(text_device)
+                                logger.info("Text encoder moved to %s for multi-GPU mode", text_device)
+                        except StopIteration:
+                            pass
                     return te_state.cached_encoder
 
                 # First call: load to CPU via ModelLedger default, then move
-                # permanently to transformer_device (text GPU in multi-GPU mode).
+                # permanently to text_device (cuda:1 in multi-GPU mode).
                 saved_device = self_model_ledger.device
                 self_model_ledger.device = torch.device("cpu")
                 try:
@@ -121,11 +141,11 @@ class LTXTextEncoder:
 
                 _quantize_linear_weights_fp8(te_state.cached_encoder)
 
-                if self.transformer_device != self.device:
-                    # Multi-GPU: text encoder lives permanently on the text GPU (cuda:1).
-                    te_state.cached_encoder.to(self.transformer_device)
-                    sync_device(self.transformer_device)
-                    logger.info("Text encoder loaded onto %s (permanent)", self.transformer_device)
+                if multi_gpu and text_device is not None:
+                    # Multi-GPU: text encoder lives permanently on cuda:1.
+                    te_state.cached_encoder.to(text_device)
+                    sync_device(text_device)
+                    logger.info("Text encoder loaded onto %s (permanent)", text_device)
                 else:
                     # Single-GPU: keep on CPU. The transformer already occupies all
                     # VRAM by the time model_ledger.text_encoder() is called inside
@@ -136,9 +156,9 @@ class LTXTextEncoder:
 
             def patched_cleanup_memory() -> None:
                 # Multi-GPU: only flush the video device (self.device) — the text
-                # encoder on self.transformer_device is intentionally kept resident.
+                # encoder on cuda:1 is intentionally kept resident.
                 # Single-GPU: same behaviour as before (flush and free).
-                if self.transformer_device != self.device and torch.cuda.is_available():
+                if _is_multi_gpu(state_getter()) and torch.cuda.is_available():
                     torch.cuda.synchronize(self.device)
                     with torch.cuda.device(self.device):
                         torch.cuda.empty_cache()
@@ -222,7 +242,7 @@ class LTXTextEncoder:
                 # Single-GPU only: encoder ran on CPU. Cache the first result in
                 # api_embeddings so the pipeline uses DummyTextEncoder on the next
                 # generation with the same prompt — skipping CPU encode entirely.
-                if self.transformer_device == self.device and te_state is not None:
+                if not _is_multi_gpu(state) and te_state is not None:
                     if te_state.api_embeddings is None and len(result) > 0:
                         from state.app_state_types import TextEncodingResult
                         v, a = result[0]

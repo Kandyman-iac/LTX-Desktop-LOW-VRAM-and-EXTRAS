@@ -86,7 +86,7 @@ class Fp8ExportHandler(StateHandlerBase):
                 self._export_state.progress = fraction
 
         try:
-            logger.info("FP8 export started: %s → %s", checkpoint_path, output_path)
+            logger.info("FP8 export started: %s -> %s", checkpoint_path, output_path)
             export_fp8_transformer(
                 checkpoint_path=checkpoint_path,
                 output_path=output_path,
