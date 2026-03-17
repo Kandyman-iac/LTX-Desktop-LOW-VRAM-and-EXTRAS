@@ -292,6 +292,11 @@ class PipelinesHandler(StateHandlerBase):
         if should_park_zit:
             self.park_zit_on_cpu()
         elif should_cleanup:
+            # Drop the local reference before cleanup so gc.collect() inside
+            # the cleaner can actually free the old pipeline's CPU tensors
+            # (block-swap buffers, VAE weights, etc.) rather than finding them
+            # still reachable via this stack frame.
+            del active
             self._gpu_cleaner.cleanup()
 
     def load_gpu_pipeline(self, model_type: VideoPipelineModelType, should_warm: bool = False) -> VideoPipelineState:
