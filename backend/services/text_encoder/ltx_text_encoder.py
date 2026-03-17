@@ -270,7 +270,7 @@ class LTXTextEncoder:
                     te_state.api_embeddings = encoded
                     te_state.prompt_cache[(original_prompt_key, enhance_locally)] = encoded
                     logger.info(
-                        "Text encoder result cached%s — subsequent generations will skip encode",
+                        "Text encoder result cached%s - subsequent generations will skip encode",
                         " (enhanced)" if enhance_locally else "",
                     )
 
