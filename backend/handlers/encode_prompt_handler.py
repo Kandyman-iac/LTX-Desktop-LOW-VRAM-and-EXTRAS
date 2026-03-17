@@ -178,76 +178,54 @@ class EncodePromptHandler(StateHandlerBase):
             logger.info("Prompt encoded on GPU and cached. Gemma returned to CPU. VRAM freed.")
 
     def enhance_prompt(self, prompt: str) -> str:
-        """Run Gemma's enhance_t2v on the prompt and return the enhanced text.
+        """Enhance a prompt using a locally running LM Studio model.
 
-        enhance_t2v uses HuggingFace generate() internally, which creates
-        intermediate tensors on CPU.  To avoid device-mismatch errors with
-        FP8-patched weights, we always move the encoder to CPU for this call
-        and restore it to its original device afterwards.
+        Calls the OpenAI-compatible endpoint exposed by LM Studio
+        (default: http://localhost:1234/v1/chat/completions).
+        No GPU involvement — pure HTTP call to the LM Studio process.
         """
-        from typing import Any, cast
+        import json
+        import urllib.error
+        import urllib.request
 
-        te = self.state.text_encoder
-        if te is None:
-            raise RuntimeError("Text encoder state not initialised")
+        lm_studio_url = "http://localhost:1234/v1/chat/completions"
 
-        gemma_root = self._text.resolve_gemma_root()
-        if not gemma_root:
-            raise RuntimeError(
-                "Local text encoder not available. "
-                "Download the text encoder or check Settings."
-            )
+        system_prompt = (
+            "You are a prompt enhancer for LTX-Video, a text-to-video AI model. "
+            "Rewrite the user's prompt to be more detailed and cinematic. "
+            "Describe motion, lighting, camera movement, and atmosphere vividly. "
+            "Keep the enhanced prompt under 250 words. "
+            "Output only the enhanced prompt — no explanations, no preamble."
+        )
 
-        # Gemma's positional embedding table tops out at 1024 tokens.
-        # At ~1.3 tokens/char (observed), 800 chars ≈ 1040 tokens — already over.
-        # Fast character-based check before we bother loading the model.
-        # ~700 chars ≈ 910 tokens, leaving headroom for the generated expansion.
-        MAX_CHARS = 700
-        if len(prompt) > MAX_CHARS:
-            estimated = int(len(prompt) * 1.3)
-            raise RuntimeError(
-                f"Prompt is too long for local enhancement "
-                f"(~{estimated} estimated tokens, Gemma max is 1024). "
-                f"Shorten to under {MAX_CHARS} characters and try again, "
-                "or skip Enhance and use Encode directly on the full prompt."
-            )
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.7,
+            "max_tokens": 512,
+            "stream": False,
+        }
 
-        encoder = self._get_or_load_encoder(gemma_root)
-
-        if not hasattr(encoder, "enhance_t2v"):
-            raise RuntimeError(
-                "Text encoder does not support local prompt enhancement "
-                "(enhance_t2v missing — is Gemma downloaded?)."
-            )
-
-        # Determine original device so we can restore it after the call.
-        try:
-            original_device = next(iter(encoder.parameters())).device
-        except StopIteration:
-            original_device = torch.device("cpu")
-
-        needs_cpu = original_device.type != "cpu"
-        if needs_cpu:
-            logger.info(
-                "Moving Gemma from %s to CPU for enhance_t2v (HF generate requires CPU tensors)",
-                original_device,
-            )
-            encoder.to("cpu")
-            if torch.cuda.is_available():
-                torch.cuda.synchronize(original_device)
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            lm_studio_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
 
         try:
-            with torch.inference_mode():
-                enhanced = cast(Any, encoder).enhance_t2v(prompt)
-            enhanced_str = str(enhanced)
-            logger.info(
-                "Prompt enhanced: %r -> %r",
-                prompt[:60],
-                enhanced_str[:60],
-            )
-            return enhanced_str
-        finally:
-            if needs_cpu:
-                logger.info("Restoring Gemma to %s after enhancement", original_device)
-                encoder.to(original_device)
-                sync_device(original_device)
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"LM Studio not reachable at {lm_studio_url}. "
+                "Make sure LM Studio is running with a model loaded and the "
+                "local server is enabled (port 1234)."
+            ) from exc
+
+        enhanced = result["choices"][0]["message"]["content"].strip()
+        logger.info("Prompt enhanced via LM Studio: %r -> %r", prompt[:60], enhanced[:60])
+        return enhanced
