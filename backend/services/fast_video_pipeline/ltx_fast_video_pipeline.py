@@ -205,6 +205,12 @@ class LTXFastVideoPipeline:
     ) -> tuple[torch.Tensor | Iterator[torch.Tensor], AudioOrNone]:
         from ltx_pipelines.utils.args import ImageConditioningInput as _LtxImageInput
 
+        # Release any fragmented reserved-but-unused CUDA memory before the
+        # pipeline runs.  The transformer denoising loop leaves scattered
+        # allocations across cuda:0; without this the VAE decoder (which needs
+        # a single ~316 MiB contiguous block) can hit OOM even when there is
+        # nominally enough free VRAM.
+        torch.cuda.empty_cache()
         return self.pipeline(
             prompt=prompt,
             seed=seed,

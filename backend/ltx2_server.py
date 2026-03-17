@@ -10,7 +10,7 @@ import os
 #   that occur when the allocator can't find a contiguous block.
 os.environ.setdefault("TORCHINDUCTOR_DISABLE_CUDAGRAPHS", "1")
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512")
 
 import sys
 from typing import Any, cast
