@@ -103,8 +103,13 @@ class LTXTextEncoder:
                     return DummyTextEncoder()
 
                 if te_state.cached_encoder is not None:
-                    # Already resident on transformer_device — return as-is.
-                    # In multi-GPU mode the encoder never leaves this device.
+                    # Already loaded. Multi-GPU: encoder stays on transformer_device.
+                    # Single-GPU: encoder is on CPU between generations — move to
+                    # self.device now so encode_text runs on GPU, not CPU.
+                    if self.transformer_device == self.device:
+                        te_state.cached_encoder.to(self.device)
+                        sync_device(self.device)
+                        logger.info("Text encoder moved to %s for encoding (single-GPU mode)", self.device)
                     return te_state.cached_encoder
 
                 # First call: load to CPU via ModelLedger default, then move
@@ -126,9 +131,11 @@ class LTXTextEncoder:
                     sync_device(self.transformer_device)
                     logger.info("Text encoder loaded onto %s (permanent)", self.transformer_device)
                 else:
-                    # Single-GPU: keep on CPU to avoid competing with transformer for VRAM.
-                    # Embeddings are transferred to self.device after encode_text runs.
-                    logger.info("Text encoder loaded to CPU (single-GPU VRAM-safe mode)")
+                    # Single-GPU: move to GPU for encoding, will be returned to CPU
+                    # (or unloaded) in patched_encode_text after embeddings are ready.
+                    te_state.cached_encoder.to(self.device)
+                    sync_device(self.device)
+                    logger.info("Text encoder moved to %s for encoding (single-GPU mode)", self.device)
                 return te_state.cached_encoder
 
             def patched_cleanup_memory() -> None:
@@ -217,17 +224,17 @@ class LTXTextEncoder:
                     for v, a in result
                 ]
 
-                # Single-GPU only: optionally unload Gemma from CPU RAM after encoding
-                # to free ~9GB of system RAM before the transformer/VAE runs.
-                # Multi-GPU skips this — the encoder lives on cuda:1, not system RAM.
-                if (
-                    self.transformer_device == self.device
-                    and te_state is not None
-                    and state.app_settings.unload_text_encoder_after_encode
-                ):
-                    te_state.cached_encoder = None
-                    gc.collect()
-                    logger.info("Text encoder unloaded from CPU RAM (low-memory mode)")
+                # Single-GPU only: return encoder to CPU RAM after encoding so the
+                # transformer gets full VRAM. Optionally unload entirely to free ~9GB
+                # system RAM before the VAE runs (at cost of reload next generation).
+                if self.transformer_device == self.device and te_state is not None and te_state.cached_encoder is not None:
+                    if state.app_settings.unload_text_encoder_after_encode:
+                        te_state.cached_encoder = None
+                        gc.collect()
+                        logger.info("Text encoder unloaded from CPU RAM (low-memory mode)")
+                    else:
+                        te_state.cached_encoder.to("cpu")
+                        logger.info("Text encoder returned to CPU (single-GPU mode)")
 
                 return result
 
