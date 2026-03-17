@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film, CheckCircle, Cpu, AlertCircle } from 'lucide-react'
+import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film, CheckCircle, Cpu, AlertCircle, Wand2 } from 'lucide-react'
 import { logger } from '../lib/logger'
 import { ImageUploader } from '../components/ImageUploader'
 import { AudioUploader } from '../components/AudioUploader'
@@ -23,6 +23,7 @@ import { RetakePanel } from '../components/RetakePanel'
 import { ICLoraPanel, CONDITIONING_TYPES, type ICLoraConditioningType } from '../components/ICLoraPanel'
 import { useGenerationHistory, type HistoryEntry } from '../hooks/use-generation-history'
 import { useEncodePrompt } from '../hooks/use-encode-prompt'
+import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
 import { OutputBrowser } from '../components/OutputBrowser'
 
 const DEFAULT_SETTINGS: GenerationSettings = {
@@ -57,6 +58,7 @@ export function Playground() {
 
   const { status, processStatus } = useBackend()
   const { isEncoding, encodedPrompt, encodeError, encodePrompt, clearEncoded } = useEncodePrompt()
+  const { isEnhancing, enhanceError, enhancePrompt } = useEnhancePrompt()
 
   // Determine whether the manual Encode Prompt workflow is relevant.
   // Shown for any local text encoder setup (single-GPU or multi-GPU).
@@ -463,6 +465,31 @@ export function Playground() {
                 maxChars={5000}
                 disabled={isBusy}
               />
+
+              {/* Enhance button — calls Gemma to expand the prompt */}
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={async () => {
+                    const result = await enhancePrompt(prompt)
+                    if (result !== null) setEditableEnhancedPrompt(result)
+                  }}
+                  disabled={isEnhancing || isBusy || !prompt.trim() || processStatus !== 'alive'}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isEnhancing
+                      ? 'bg-purple-900/60 text-purple-300'
+                      : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                  }`}
+                  title="Run Gemma locally to expand the prompt (loads text encoder)"
+                >
+                  <Wand2 className={`h-3.5 w-3.5 ${isEnhancing ? 'animate-pulse' : ''}`} />
+                  {isEnhancing ? 'Enhancing…' : 'Enhance'}
+                </button>
+                {enhanceError && (
+                  <span className="text-xs text-red-400 truncate" title={enhanceError}>
+                    {enhanceError}
+                  </span>
+                )}
+              </div>
 
               {/* Encode Prompt button — single-GPU + local encoder only */}
               {showEncodeButton && (

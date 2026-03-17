@@ -20,6 +20,15 @@ class EncodePromptResponse(BaseModel):
     encoded_prompt: str
 
 
+class EnhancePromptRequest(BaseModel):
+    prompt: str
+
+
+class EnhancePromptResponse(BaseModel):
+    status: str
+    enhanced_prompt: str
+
+
 class EncodePromptStatusResponse(BaseModel):
     single_gpu_local_mode: bool
     encoded_prompt: str | None
@@ -33,6 +42,16 @@ def route_encode_prompt(
     """POST /api/encode-prompt — GPU-encode the prompt; ejects video model first."""
     handler.encode_prompt.encode_prompt(req.prompt)
     return EncodePromptResponse(status="ok", encoded_prompt=req.prompt.strip())
+
+
+@router.post("/enhance-prompt", response_model=EnhancePromptResponse)
+def route_enhance_prompt(
+    req: EnhancePromptRequest,
+    handler: AppHandler = Depends(get_state_service),
+) -> EnhancePromptResponse:
+    """POST /api/enhance-prompt — run Gemma enhance_t2v on the prompt text only."""
+    enhanced = handler.encode_prompt.enhance_prompt(req.prompt)
+    return EnhancePromptResponse(status="ok", enhanced_prompt=enhanced)
 
 
 @router.get("/encode-prompt/status", response_model=EncodePromptStatusResponse)

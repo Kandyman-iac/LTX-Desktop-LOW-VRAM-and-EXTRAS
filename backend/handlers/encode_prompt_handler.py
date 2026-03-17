@@ -161,3 +161,80 @@ class EncodePromptHandler(StateHandlerBase):
         logger.info(
             "Prompt encoded on GPU and cached. Gemma returned to CPU. VRAM freed."
         )
+
+    def enhance_prompt(self, prompt: str) -> str:
+        """Run Gemma's enhance_t2v on the prompt and return the enhanced text.
+
+        Unlike encode_prompt, this only calls the LM for text expansion — no
+        embeddings are computed or cached.  In multi-GPU mode the text encoder
+        is already resident on cuda:1 so this is fast.  In single-GPU mode the
+        pipeline is ejected and Gemma is moved to GPU for the call.
+        """
+        from typing import Any, cast
+
+        te = self.state.text_encoder
+        if te is None:
+            raise RuntimeError("Text encoder state not initialised")
+
+        gemma_root = self._text.resolve_gemma_root()
+        if not gemma_root:
+            raise RuntimeError(
+                "Local text encoder not available. "
+                "Download the text encoder or check Settings."
+            )
+
+        encoder = te.cached_encoder
+        if encoder is None:
+            logger.info("Cold-start: loading Gemma text encoder for prompt enhancement…")
+            self._pipelines._install_text_patches_if_needed()
+            checkpoint_path = str(
+                resolve_model_path(
+                    self.models_dir, self.config.model_download_specs, "checkpoint"
+                )
+            )
+            from ltx_pipelines.utils.model_ledger import ModelLedger
+            ledger = ModelLedger(
+                dtype=torch.bfloat16,
+                device=torch.device("cpu"),
+                checkpoint_path=checkpoint_path,
+                gemma_root_path=gemma_root,
+            )
+            encoder = ledger.text_encoder()
+            if encoder is None or type(encoder).__name__ == "DummyTextEncoder":
+                raise RuntimeError("Failed to load Gemma text encoder")
+
+        if not hasattr(encoder, "enhance_t2v"):
+            raise RuntimeError(
+                "Text encoder does not support local prompt enhancement "
+                "(enhance_t2v missing — is Gemma downloaded?)."
+            )
+
+        # Multi-GPU: encoder already resident on cuda:1, use as-is.
+        # Single-GPU: eject the video pipeline and move encoder to GPU.
+        is_multi_gpu = self.state.app_settings.use_multi_gpu
+        moved_to_gpu = False
+        if not is_multi_gpu:
+            self._pipelines.unload_gpu_pipeline()
+            device = self.config.device
+            logger.info("Moving Gemma to %s for prompt enhancement", device)
+            encoder.to(device)
+            sync_device(device)
+            moved_to_gpu = True
+
+        try:
+            with torch.inference_mode():
+                enhanced = cast(Any, encoder).enhance_t2v(prompt)
+            enhanced_str = str(enhanced)
+            logger.info(
+                "Prompt enhanced: %r -> %r",
+                prompt[:60],
+                enhanced_str[:60],
+            )
+            return enhanced_str
+        finally:
+            if moved_to_gpu:
+                logger.info("Returning Gemma to CPU; freeing VRAM")
+                encoder.to("cpu")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
