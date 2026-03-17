@@ -144,6 +144,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       imageUrls: [],
       imagePaths: [],
       error: null,
+      enhancedPrompt: null,
     })
 
     abortControllerRef.current = new AbortController()
@@ -258,6 +259,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
           imageUrls: [],
           imagePaths: [],
           error: null,
+          enhancedPrompt: null,
         })
 
         onGenerationSuccess?.({
@@ -367,6 +369,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       imageUrls: [],
       imagePaths: [],
       error: null,
+      enhancedPrompt: null,
     })
 
     abortControllerRef.current = new AbortController()
@@ -456,6 +459,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
             imageUrls: fileUrls,    // All images
             imagePaths: rawPaths,   // All image paths
             error: null,
+            enhancedPrompt: null,
           })
         }
       } else if (result.status === 'cancelled') {

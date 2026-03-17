@@ -59,11 +59,14 @@ export function Playground() {
   const { isEncoding, encodedPrompt, encodeError, encodePrompt, clearEncoded } = useEncodePrompt()
 
   // Determine whether the manual Encode Prompt workflow is relevant.
-  // Only shown for single-GPU + local encoder (multi-GPU handles it automatically).
-  const showEncodeButton = appSettings.useLocalTextEncoder && !appSettings.useMultiGpu
+  // Shown for any local text encoder setup (single-GPU or multi-GPU).
+  const showEncodeButton = appSettings.useLocalTextEncoder
 
   // Track whether the current prompt differs from the last encoded one.
   const isPromptChanged = showEncodeButton && encodedPrompt !== null && prompt.trim() !== encodedPrompt
+
+  // Editable copy of the Gemma-enhanced prompt (populated after generation).
+  const [editableEnhancedPrompt, setEditableEnhancedPrompt] = useState<string | null>(null)
 
   useEffect(() => {
     if (!shouldVideoGenerateWithLtxApi || mode === 'text-to-image') return
@@ -99,6 +102,7 @@ export function Playground() {
     videoUrl,
     videoPath,
     imageUrl,
+    enhancedPrompt,
     error: generationError,
     generate,
     generateImage,
@@ -119,6 +123,11 @@ export function Playground() {
       }
     },
   })
+
+  // Sync editableEnhancedPrompt whenever a new enhanced prompt arrives from generation.
+  useEffect(() => {
+    if (enhancedPrompt !== null) setEditableEnhancedPrompt(enhancedPrompt)
+  }, [enhancedPrompt])
 
   const {
     submitRetake,
@@ -217,6 +226,7 @@ export function Playground() {
 
   const handleClearAll = () => {
     clearEncoded()
+    setEditableEnhancedPrompt(null)
     setPrompt('')
     setNegativePrompt('')
     setSelectedImage(null)
@@ -505,6 +515,58 @@ export function Playground() {
                     <span className="text-xs text-red-400 truncate" title={encodeError}>
                       {encodeError}
                     </span>
+                  )}
+                </div>
+              )}
+
+              {/* Enhanced prompt (from Gemma local enhancement) */}
+              {editableEnhancedPrompt !== null && (
+                <div className="mt-3 w-full">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-semibold text-purple-400 uppercase leading-4 flex items-center gap-1">
+                      <Sparkles size={10} />
+                      Enhanced prompt
+                    </span>
+                    <button
+                      onClick={() => setEditableEnhancedPrompt(null)}
+                      className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                      title="Dismiss"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <textarea
+                    value={editableEnhancedPrompt}
+                    onChange={(e) => setEditableEnhancedPrompt(e.target.value)}
+                    disabled={isBusy}
+                    rows={4}
+                    className="w-full resize-none rounded-lg bg-zinc-900 border border-purple-900/50 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-purple-700 disabled:opacity-50"
+                  />
+                  {showEncodeButton && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <button
+                        onClick={() => encodePrompt(editableEnhancedPrompt)}
+                        disabled={isEncoding || isBusy || !editableEnhancedPrompt.trim() || processStatus !== 'alive'}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          isEncoding
+                            ? 'bg-zinc-700 text-zinc-300'
+                            : encodedPrompt === editableEnhancedPrompt.trim()
+                            ? 'bg-emerald-800/60 text-emerald-300 hover:bg-emerald-800'
+                            : encodedPrompt !== null
+                            ? 'bg-amber-800/60 text-amber-300 hover:bg-amber-800'
+                            : 'bg-purple-900/60 text-purple-300 hover:bg-purple-900'
+                        }`}
+                        title="Encode enhanced prompt on GPU"
+                      >
+                        {isEncoding ? (
+                          <><Cpu className="h-3.5 w-3.5 animate-pulse" />Encoding…</>
+                        ) : encodedPrompt === editableEnhancedPrompt.trim() ? (
+                          <><CheckCircle className="h-3.5 w-3.5" />Encoded</>
+                        ) : (
+                          <><Cpu className="h-3.5 w-3.5" />Encode enhanced</>
+                        )}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
