@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from handlers.base import StateHandlerBase
 from handlers.text_handler import TextHandler
 from runtime_config.model_download_specs import resolve_model_path
+from services.fp8_export_service import fp8_transformer_path
 from services.interfaces import (
     A2VPipeline,
     DepthProcessorPipeline,
@@ -154,6 +155,13 @@ class PipelinesHandler(StateHandlerBase):
                 transformer_device = torch.device(settings.transformer_device)
             except Exception:
                 pass
+        # Use pre-quantized FP8 file if it exists (avoids on-the-fly downcast on every load).
+        fp8_pre_quantized = ""
+        _fp8_path = fp8_transformer_path(self.models_dir)
+        if _fp8_path.exists():
+            fp8_pre_quantized = str(_fp8_path)
+            logger.info("Pre-quantized FP8 transformer found: %s", fp8_pre_quantized)
+
         pipeline = self._fast_video_pipeline_class.create(
             checkpoint_path,
             gemma_root,
@@ -166,6 +174,7 @@ class PipelinesHandler(StateHandlerBase):
             gguf_transformer_path=settings.gguf_transformer_path,
             vae_spatial_tile_size=settings.vae_spatial_tile_size,
             vae_temporal_tile_size=settings.vae_temporal_tile_size,
+            pre_quantized_transformer_path=fp8_pre_quantized,
         )
 
         state = VideoPipelineState(

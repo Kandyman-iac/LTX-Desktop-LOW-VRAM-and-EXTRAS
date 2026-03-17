@@ -9,6 +9,7 @@ from state.app_settings import AppSettings
 from handlers import (
     DownloadHandler,
     EncodePromptHandler,
+    Fp8ExportHandler,
     GenerationHandler,
     HealthHandler,
     IcLoraHandler,
@@ -194,6 +195,12 @@ class AppHandler:
             lock=self._lock,
             config=config,
             http=http,
+        )
+
+        self.fp8_export = Fp8ExportHandler(
+            state=self.state,
+            lock=self._lock,
+            config=config,
         )
 
         self.encode_prompt = EncodePromptHandler(

@@ -29,6 +29,7 @@ class LTXFastVideoPipeline:
         gguf_transformer_path: str = "",
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
+        pre_quantized_transformer_path: str = "",
     ) -> "LTXFastVideoPipeline":
         return LTXFastVideoPipeline(
             checkpoint_path=checkpoint_path,
@@ -42,6 +43,7 @@ class LTXFastVideoPipeline:
             gguf_transformer_path=gguf_transformer_path,
             vae_spatial_tile_size=vae_spatial_tile_size,
             vae_temporal_tile_size=vae_temporal_tile_size,
+            pre_quantized_transformer_path=pre_quantized_transformer_path,
         )
 
     def __init__(
@@ -57,6 +59,7 @@ class LTXFastVideoPipeline:
         gguf_transformer_path: str = "",
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
+        pre_quantized_transformer_path: str = "",
     ) -> None:
         from ltx_core.quantization import QuantizationPolicy
         from ltx_pipelines.distilled import DistilledPipeline
@@ -82,6 +85,11 @@ class LTXFastVideoPipeline:
             quantization=QuantizationPolicy.fp8_cast() if use_fp8 else None,
         )
 
+        # ── Swap in pre-quantized FP8 transformer (faster load, no on-the-fly downcast) ──
+        # Skip if GGUF is configured — GGUF provides its own transformer weights.
+        if use_fp8 and pre_quantized_transformer_path and os.path.exists(pre_quantized_transformer_path) and not gguf_transformer_path:
+            self._install_pre_quantized_transformer(pre_quantized_transformer_path)
+
         # ── Install GGUF loader (replaces transformer weights source) ──
         if gguf_transformer_path:
             self._install_gguf(gguf_transformer_path)
@@ -93,6 +101,38 @@ class LTXFastVideoPipeline:
         # ── Install attention tiling ──
         if attention_tile_size > 0:
             self._install_attention_tiling(attention_tile_size)
+
+    def _install_pre_quantized_transformer(self, fp8_path: str) -> None:
+        """Replace the transformer builder with a pre-quantized FP8 file loader.
+
+        The pre-quantized file contains LTXModel state dict (velocity_model keys,
+        already renamed, already fp8).  No ComfyUI renaming or fp8 downcast needed —
+        only UPCAST_DURING_INFERENCE to patch nn.Linear.forward at inference time.
+        """
+        try:
+            from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder
+            from ltx_core.model.transformer import LTXModelConfigurator
+            from ltx_core.quantization import QuantizationPolicy, UPCAST_DURING_INFERENCE
+            import logging
+            _log = logging.getLogger(__name__)
+
+            ledger = self.pipeline.model_ledger
+            ledger.transformer_builder = SingleGPUModelBuilder(
+                model_class_configurator=LTXModelConfigurator,
+                model_path=fp8_path,
+                model_sd_ops=None,  # keys already in LTX format, no renaming needed
+                registry=ledger.registry,
+            )
+            ledger.quantization = QuantizationPolicy(
+                sd_ops=None,           # already fp8, no downcast needed
+                module_ops=(UPCAST_DURING_INFERENCE,),
+            )
+            _log.info("Pre-quantized FP8 transformer installed from %s", fp8_path)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Pre-quantized FP8 install failed (%s) — falling back to on-the-fly fp8_cast", exc
+            )
 
     def _install_gguf(self, gguf_path: str) -> None:
         try:

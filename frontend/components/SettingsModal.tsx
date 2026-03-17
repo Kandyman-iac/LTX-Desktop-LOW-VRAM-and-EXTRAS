@@ -43,6 +43,13 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
   const [showModelLicense, setShowModelLicense] = useState(false)
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false)
   const [projectAssetsPath, setProjectAssetsPath] = useState('')
+  const [fp8ExportStatus, setFp8ExportStatus] = useState<{
+    status: string
+    progress: number
+    error: string | null
+    file_exists: boolean
+  } | null>(null)
+  const [fp8ExportStarted, setFp8ExportStarted] = useState(false)
 
   // Sync active tab with initialTab prop when modal opens
   useEffect(() => {
@@ -102,6 +109,35 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     const interval = setInterval(fetchStatus, 2000)
     return () => clearInterval(interval)
   }, [isOpen, isDownloading])
+
+  // Poll FP8 export status when inference tab is open
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'inference') return
+
+    const fetchFp8Status = async () => {
+      try {
+        const res = await backendFetch('/api/models/export-fp8/status')
+        if (res.ok) {
+          const data = await res.json()
+          setFp8ExportStatus(data)
+          if (data.status === 'running') setFp8ExportStarted(true)
+        }
+      } catch { /* ignore */ }
+    }
+
+    fetchFp8Status()
+    const interval = setInterval(fetchFp8Status, 2000)
+    return () => clearInterval(interval)
+  }, [isOpen, activeTab])
+
+  const handleExportFp8 = async () => {
+    setFp8ExportStarted(true)
+    try {
+      await backendFetch('/api/models/export-fp8', { method: 'POST' })
+    } catch (e) {
+      logger.error(`Failed to start FP8 export: ${e}`)
+    }
+  }
 
   // Handle text encoder download
   const handleDownloadTextEncoder = async () => {
@@ -1182,6 +1218,42 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       placeholder="e.g. C:\models\transformer.gguf"
                       className="w-full px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
                     />
+                  </div>
+
+                  {/* FP8 Pre-quantized Export */}
+                  <div className="space-y-2 pt-2 border-t border-zinc-700">
+                    <div>
+                      <label className="text-sm text-white">Pre-quantized FP8 Export</label>
+                      <p className="text-xs text-zinc-500">
+                        Saves a ~3 GB pre-quantized file so FP8 conversion is skipped on every launch.
+                        {fp8ExportStatus?.file_exists && ' File already exists — re-export to refresh.'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <Button
+                        variant="outline"
+                        className="border-zinc-600 text-xs h-7 px-3"
+                        onClick={handleExportFp8}
+                        disabled={fp8ExportStatus?.status === 'running'}
+                      >
+                        {fp8ExportStatus?.status === 'running'
+                          ? `Exporting… ${Math.round((fp8ExportStatus.progress ?? 0) * 100)}%`
+                          : fp8ExportStatus?.file_exists
+                          ? 'Re-export FP8'
+                          : 'Export FP8'}
+                      </Button>
+                      {fp8ExportStatus?.file_exists && fp8ExportStatus.status !== 'running' && (
+                        <span className="text-xs text-emerald-400 flex items-center gap-1">
+                          <Check className="h-3 w-3" /> Cached
+                        </span>
+                      )}
+                      {fp8ExportStatus?.status === 'done' && fp8ExportStarted && (
+                        <span className="text-xs text-emerald-400">Export complete — restart to use</span>
+                      )}
+                      {fp8ExportStatus?.status === 'error' && (
+                        <span className="text-xs text-red-400">{fp8ExportStatus.error}</span>
+                      )}
+                    </div>
                   </div>
 
                   {/* VAE Tiling */}
