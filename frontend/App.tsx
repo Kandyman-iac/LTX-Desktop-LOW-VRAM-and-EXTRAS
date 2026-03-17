@@ -269,6 +269,9 @@ function AppContent() {
         blocking: true,
         includeOptionalMissing: true,
       })
+    } else if (!shouldBlockForLtxKey && apiGatewayRequest?.blocking) {
+      // Runtime policy loaded and local generation is available — dismiss the gate.
+      setApiGatewayRequest(null)
     }
   }, [shouldBlockForLtxKey, apiGatewayRequest])
 
