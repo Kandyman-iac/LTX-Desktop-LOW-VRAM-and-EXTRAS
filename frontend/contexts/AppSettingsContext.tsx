@@ -40,6 +40,7 @@ export interface AppSettings {
   vaeSpatialTileSize: number
   vaeTemporalTileSize: number
   unloadTextEncoderAfterEncode: boolean
+  enhancePromptLocally: boolean
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -70,6 +71,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   vaeSpatialTileSize: 0,
   vaeTemporalTileSize: 0,
   unloadTextEncoderAfterEncode: false,
+  enhancePromptLocally: false,
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -130,6 +132,7 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     vaeSpatialTileSize: data.vaeSpatialTileSize ?? DEFAULT_APP_SETTINGS.vaeSpatialTileSize,
     vaeTemporalTileSize: data.vaeTemporalTileSize ?? DEFAULT_APP_SETTINGS.vaeTemporalTileSize,
     unloadTextEncoderAfterEncode: data.unloadTextEncoderAfterEncode ?? DEFAULT_APP_SETTINGS.unloadTextEncoderAfterEncode,
+    enhancePromptLocally: data.enhancePromptLocally ?? DEFAULT_APP_SETTINGS.enhancePromptLocally,
   }
 }
 

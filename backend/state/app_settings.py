@@ -92,6 +92,9 @@ class AppSettings(SettingsBaseModel):
     # Free text encoder from CPU RAM after encoding (single-GPU only).
     # Saves ~9GB system RAM at the cost of ~30s reload on next generation.
     unload_text_encoder_after_encode: bool = False
+    # Run Gemma's built-in enhance_t2v() locally before encoding.
+    # Uses the already-loaded model — no extra VRAM cost.
+    enhance_prompt_locally: bool = False
 
     @field_validator("block_swap_blocks_on_gpu", mode="before")
     @classmethod
@@ -188,6 +191,7 @@ class SettingsResponse(SettingsBaseModel):
     vae_spatial_tile_size: int = 0
     vae_temporal_tile_size: int = 0
     unload_text_encoder_after_encode: bool = False
+    enhance_prompt_locally: bool = False
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:

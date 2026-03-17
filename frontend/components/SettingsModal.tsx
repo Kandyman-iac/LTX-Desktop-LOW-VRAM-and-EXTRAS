@@ -264,6 +264,9 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
       onSettingsChange({ ...settings, promptEnhancerEnabledI2V: !settings.promptEnhancerEnabledI2V })
     }
   }
+  const handleToggleEnhancePromptLocally = () => {
+    onSettingsChange({ ...settings, enhancePromptLocally: !settings.enhancePromptLocally })
+  }
   // Analytics handler
   const handleToggleAnalytics = () => {
     const next = !analyticsEnabled
@@ -1346,9 +1349,40 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 </div>
 
                 <p className="text-xs text-zinc-500 leading-relaxed">
-                  Automatically enhances your prompts via the LTX API with rich visual details, sound descriptions,
-                  and motion cues to help generate higher quality videos. Control independently for each generation type.
+                  Automatically enhances your prompts with rich visual details, sound descriptions,
+                  and motion cues to help generate higher quality videos.
                 </p>
+
+                {/* Local enhancement toggle — uses the already-loaded Gemma model */}
+                <div
+                  className="flex items-center justify-between bg-zinc-800/50 rounded-lg px-4 py-3 border border-zinc-700/50 cursor-pointer"
+                  onClick={handleToggleEnhancePromptLocally}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-semibold text-purple-400 bg-purple-400/10 px-1.5 py-0.5 rounded">LOCAL</span>
+                    <div>
+                      <span className="text-sm text-zinc-200">On-device enhancement</span>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">
+                        {settings.enhancePromptLocally
+                          ? 'Gemma expands prompts locally before encoding — no API needed'
+                          : 'Prompts sent to encoder as-is'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                    settings.enhancePromptLocally ? 'bg-purple-500' : 'bg-zinc-700'
+                  }`}>
+                    <div className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform pointer-events-none ${
+                      settings.enhancePromptLocally ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="flex-1 h-px bg-zinc-700/50" />
+                  <span className="text-[10px] text-zinc-600">or via LTX API</span>
+                  <div className="flex-1 h-px bg-zinc-700/50" />
+                </div>
 
                 {!settings.hasLtxApiKey ? (
                   <div className="space-y-4 mt-2">

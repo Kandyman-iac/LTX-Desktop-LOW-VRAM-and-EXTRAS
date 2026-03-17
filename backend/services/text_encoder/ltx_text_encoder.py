@@ -222,6 +222,23 @@ class LTXTextEncoder:
                     return out
 
                 prompt_list = [prompts] if isinstance(prompts, str) else list(prompts)
+                original_prompt_key = prompt_list[0].strip() if prompt_list else ""
+
+                # Local prompt enhancement: call Gemma's built-in enhance_t2v()
+                # before encoding.  Uses the already-loaded model — no extra VRAM.
+                enhance_locally = getattr(state.app_settings, "enhance_prompt_locally", False)
+                if enhance_locally and hasattr(text_encoder, "enhance_t2v") and prompt_list:
+                    try:
+                        enhanced = cast(Any, text_encoder).enhance_t2v(prompt_list[0])
+                        logger.info(
+                            "Local prompt enhanced: %r -> %r",
+                            prompt_list[0][:60],
+                            enhanced[:60],
+                        )
+                        prompt_list = [enhanced] + prompt_list[1:]
+                    except Exception as exc:
+                        logger.warning("Local prompt enhancement failed, using original: %s", exc)
+
                 # Encoding runs on transformer_device (text GPU).
                 # Transfer results to device (video GPU) so the transformer
                 # never sees cross-device tensors.
@@ -248,11 +265,14 @@ class LTXTextEncoder:
                         v, a = result[0]
                         encoded = TextEncodingResult(video_context=v, audio_context=a)
                         te_state.api_embeddings = encoded
-                        # Also write to prompt_cache so text_handler can serve it
-                        # as api_embeddings on the next generation (DummyTextEncoder path).
-                        prompt_key = prompt_list[0].strip() if prompt_list else ""
-                        te_state.prompt_cache[(prompt_key, False)] = encoded
-                        logger.info("Text encoder result cached (subsequent generations will skip CPU encode)")
+                        # Cache under original prompt + enhance_locally flag so
+                        # text_handler can serve it as api_embeddings on the next
+                        # generation with the same prompt (DummyTextEncoder path).
+                        te_state.prompt_cache[(original_prompt_key, enhance_locally)] = encoded
+                        logger.info(
+                            "Text encoder result cached%s (subsequent generations will skip CPU encode)",
+                            " (enhanced)" if enhance_locally else "",
+                        )
                     if state.app_settings.unload_text_encoder_after_encode:
                         te_state.cached_encoder = None
                         gc.collect()

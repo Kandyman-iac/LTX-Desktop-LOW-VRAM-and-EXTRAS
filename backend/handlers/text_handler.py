@@ -95,7 +95,8 @@ class TextHandler(StateHandlerBase):
         # If found, set api_embeddings so the pipeline uses DummyTextEncoder and skips
         # the CPU encode entirely (key uses False since local encode never does enhancement).
         if use_local:
-            cached = self._get_cached_prompt(prompt, False)
+            enhance_locally = getattr(settings, "enhance_prompt_locally", False)
+            cached = self._get_cached_prompt(prompt, enhance_locally)
             if cached is not None:
                 self._set_api_embeddings(cached)
             else:
