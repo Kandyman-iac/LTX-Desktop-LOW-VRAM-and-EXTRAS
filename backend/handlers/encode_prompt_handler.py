@@ -198,6 +198,20 @@ class EncodePromptHandler(StateHandlerBase):
                 "Download the text encoder or check Settings."
             )
 
+        # Gemma's positional embedding table tops out at 1024 tokens.
+        # At ~1.3 tokens/char (observed), 800 chars ≈ 1040 tokens — already over.
+        # Fast character-based check before we bother loading the model.
+        # ~700 chars ≈ 910 tokens, leaving headroom for the generated expansion.
+        MAX_CHARS = 700
+        if len(prompt) > MAX_CHARS:
+            estimated = int(len(prompt) * 1.3)
+            raise RuntimeError(
+                f"Prompt is too long for local enhancement "
+                f"(~{estimated} estimated tokens, Gemma max is 1024). "
+                f"Shorten to under {MAX_CHARS} characters and try again, "
+                "or skip Enhance and use Encode directly on the full prompt."
+            )
+
         encoder = self._get_or_load_encoder(gemma_root)
 
         if not hasattr(encoder, "enhance_t2v"):
