@@ -519,57 +519,62 @@ export function Playground() {
                 </div>
               )}
 
-              {/* Enhanced prompt (from Gemma local enhancement) */}
-              {editableEnhancedPrompt !== null && (
-                <div className="mt-3 w-full">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] font-semibold text-purple-400 uppercase leading-4 flex items-center gap-1">
-                      <Sparkles size={10} />
-                      Enhanced prompt
-                    </span>
+              {/* Enhanced prompt (from Gemma local enhancement) — always visible */}
+              <div className="mt-3 w-full">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-semibold text-purple-400 uppercase leading-4 flex items-center gap-1">
+                    <Sparkles size={10} />
+                    Enhanced prompt
+                  </span>
+                  {editableEnhancedPrompt !== null && (
                     <button
                       onClick={() => setEditableEnhancedPrompt(null)}
                       className="text-zinc-600 hover:text-zinc-400 transition-colors"
-                      title="Dismiss"
+                      title="Clear enhanced prompt"
                     >
                       <X size={12} />
                     </button>
-                  </div>
-                  <textarea
-                    value={editableEnhancedPrompt}
-                    onChange={(e) => setEditableEnhancedPrompt(e.target.value)}
-                    disabled={isBusy}
-                    rows={4}
-                    className="w-full resize-none rounded-lg bg-zinc-900 border border-purple-900/50 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-purple-700 disabled:opacity-50"
-                  />
-                  {showEncodeButton && (
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <button
-                        onClick={() => encodePrompt(editableEnhancedPrompt)}
-                        disabled={isEncoding || isBusy || !editableEnhancedPrompt.trim() || processStatus !== 'alive'}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                          isEncoding
-                            ? 'bg-zinc-700 text-zinc-300'
-                            : encodedPrompt === editableEnhancedPrompt.trim()
-                            ? 'bg-emerald-800/60 text-emerald-300 hover:bg-emerald-800'
-                            : encodedPrompt !== null
-                            ? 'bg-amber-800/60 text-amber-300 hover:bg-amber-800'
-                            : 'bg-purple-900/60 text-purple-300 hover:bg-purple-900'
-                        }`}
-                        title="Encode enhanced prompt on GPU"
-                      >
-                        {isEncoding ? (
-                          <><Cpu className="h-3.5 w-3.5 animate-pulse" />Encoding…</>
-                        ) : encodedPrompt === editableEnhancedPrompt.trim() ? (
-                          <><CheckCircle className="h-3.5 w-3.5" />Encoded</>
-                        ) : (
-                          <><Cpu className="h-3.5 w-3.5" />Encode enhanced</>
-                        )}
-                      </button>
-                    </div>
                   )}
                 </div>
-              )}
+                <textarea
+                  value={editableEnhancedPrompt ?? ''}
+                  onChange={(e) => setEditableEnhancedPrompt(e.target.value || null)}
+                  placeholder="Enhanced prompt will appear here after generation (enable LOCAL in Settings → Prompt Enhancer)..."
+                  disabled={isBusy || editableEnhancedPrompt === null}
+                  rows={4}
+                  className={`w-full resize-none rounded-lg bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-700 disabled:opacity-50 ${
+                    editableEnhancedPrompt !== null
+                      ? 'border border-purple-900/50 text-zinc-200'
+                      : 'border border-zinc-800 text-zinc-500'
+                  }`}
+                />
+                {showEncodeButton && editableEnhancedPrompt !== null && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <button
+                      onClick={() => encodePrompt(editableEnhancedPrompt)}
+                      disabled={isEncoding || isBusy || !editableEnhancedPrompt.trim() || processStatus !== 'alive'}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        isEncoding
+                          ? 'bg-zinc-700 text-zinc-300'
+                          : encodedPrompt === editableEnhancedPrompt.trim()
+                          ? 'bg-emerald-800/60 text-emerald-300 hover:bg-emerald-800'
+                          : encodedPrompt !== null
+                          ? 'bg-amber-800/60 text-amber-300 hover:bg-amber-800'
+                          : 'bg-purple-900/60 text-purple-300 hover:bg-purple-900'
+                      }`}
+                      title="Encode enhanced prompt on GPU"
+                    >
+                      {isEncoding ? (
+                        <><Cpu className="h-3.5 w-3.5 animate-pulse" />Encoding…</>
+                      ) : encodedPrompt === editableEnhancedPrompt.trim() ? (
+                        <><CheckCircle className="h-3.5 w-3.5" />Encoded</>
+                      ) : (
+                        <><Cpu className="h-3.5 w-3.5" />Encode enhanced</>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Negative prompt */}
               <div className="mt-2">
