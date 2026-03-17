@@ -75,10 +75,24 @@ class PipelinesHandler(StateHandlerBase):
             case _:
                 return
 
+    def _pipeline_config_key(self, model_type: VideoPipelineModelType) -> tuple[object, ...]:
+        s = self.state.app_settings
+        return (
+            model_type,
+            s.block_swap_blocks_on_gpu,
+            s.attention_tile_size,
+            s.use_fp8_transformer,
+            s.gguf_transformer_path,
+            s.vae_spatial_tile_size,
+            s.vae_temporal_tile_size,
+            s.use_multi_gpu,
+            s.transformer_device,
+        )
+
     def _pipeline_matches_model_type(self, model_type: VideoPipelineModelType) -> bool:
         match self.state.gpu_slot:
-            case GpuSlot(active_pipeline=VideoPipelineState(pipeline=pipeline)):
-                return pipeline.pipeline_kind == model_type
+            case GpuSlot(active_pipeline=VideoPipelineState(pipeline=pipeline, config_key=key)):
+                return pipeline.pipeline_kind == model_type and key == self._pipeline_config_key(model_type)
             case _:
                 return False
 
@@ -158,6 +172,7 @@ class PipelinesHandler(StateHandlerBase):
             pipeline=pipeline,
             warmth=VideoPipelineWarmth.COLD,
             is_compiled=False,
+            config_key=self._pipeline_config_key(model_type),
         )
         return self._compile_if_enabled(state)
 

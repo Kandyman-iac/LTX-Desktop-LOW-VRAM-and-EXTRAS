@@ -58,7 +58,9 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # SageAttention Integration
 # ============================================================
-use_sage_attention = os.environ.get("USE_SAGE_ATTENTION", "1") == "1"
+# DIAGNOSTIC: defaulting to "0" to test if SageAttention causes the 2x slowdown.
+# Restore to "1" after benchmarking.
+use_sage_attention = os.environ.get("USE_SAGE_ATTENTION", "0") == "1"
 _sageattention_runtime_fallback_logged = False
 
 if use_sage_attention:

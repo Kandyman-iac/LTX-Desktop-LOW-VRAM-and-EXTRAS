@@ -99,6 +99,7 @@ class VideoPipelineState:
     pipeline: FastVideoPipeline
     warmth: VideoPipelineWarmth
     is_compiled: bool
+    config_key: tuple[object, ...] = field(default_factory=tuple)
 
 
 @dataclass
