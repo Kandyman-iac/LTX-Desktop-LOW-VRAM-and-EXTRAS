@@ -51,8 +51,40 @@ class EncodePromptHandler(StateHandlerBase):
         te = self.state.text_encoder
         return te.encoded_prompt if te is not None else None
 
+    def _get_or_load_encoder(self, gemma_root: str) -> object:
+        """Return the cached encoder, cold-loading from disk if necessary."""
+        te = self.state.text_encoder
+        assert te is not None
+        encoder = te.cached_encoder
+        if encoder is None:
+            logger.info("Cold-start: loading Gemma text encoder from disk to CPU…")
+            self._pipelines._install_text_patches_if_needed()
+            checkpoint_path = str(
+                resolve_model_path(
+                    self.models_dir, self.config.model_download_specs, "checkpoint"
+                )
+            )
+            from ltx_pipelines.utils.model_ledger import ModelLedger
+            ledger = ModelLedger(
+                dtype=torch.bfloat16,
+                device=torch.device("cpu"),
+                checkpoint_path=checkpoint_path,
+                gemma_root_path=gemma_root,
+            )
+            encoder = ledger.text_encoder()  # type: ignore[assignment]
+            if encoder is None or type(encoder).__name__ == "DummyTextEncoder":
+                raise RuntimeError(
+                    "Failed to load Gemma text encoder — "
+                    "DummyTextEncoder returned unexpectedly during cold-start"
+                )
+        return encoder
+
     def encode_prompt(self, prompt: str) -> None:
-        """Eject video pipeline, load Gemma to GPU, encode prompt, cache, unload Gemma.
+        """Encode a prompt on GPU and cache the embeddings.
+
+        Single-GPU: ejects the video pipeline, encodes on cuda:0, returns encoder
+        to CPU.  Multi-GPU: the text encoder already lives on cuda:1 — encode
+        there without touching the video pipeline.
 
         Always stores the result under the key (prompt.strip(), False) because
         local encoding never applies prompt enhancement.
@@ -68,51 +100,31 @@ class EncodePromptHandler(StateHandlerBase):
                 "Download the text encoder or check Settings."
             )
 
-        # ── 1. Free VRAM ────────────────────────────────────────────────────
-        self._pipelines.unload_gpu_pipeline()
-        logger.info("GPU pipeline ejected; VRAM freed for prompt encoding")
+        is_multi_gpu = self.state.app_settings.use_multi_gpu
 
-        # ── 2. Obtain GemmaTextEncoder on CPU ──────────────────────────────
-        # Clear api_embeddings so patched_text_encoder returns the real encoder
-        # (not DummyTextEncoder).  We will overwrite api_embeddings at the end.
+        # ── 1. Free VRAM (single-GPU only) ──────────────────────────────────
+        if not is_multi_gpu:
+            self._pipelines.unload_gpu_pipeline()
+            logger.info("GPU pipeline ejected; VRAM freed for prompt encoding")
+
+        # ── 2. Obtain GemmaTextEncoder ──────────────────────────────────────
+        # Clear api_embeddings so the pipeline uses DummyTextEncoder after caching.
         with self._lock:
             te.api_embeddings = None
 
-        encoder = te.cached_encoder
-        if encoder is None:
-            logger.info("Cold-start: loading Gemma text encoder from disk to CPU…")
-            # Ensure the ModelLedger.text_encoder() monkey-patch is active so
-            # the patched version handles FP8 quantisation and caching.
-            self._pipelines._install_text_patches_if_needed()
+        encoder = self._get_or_load_encoder(gemma_root)
 
-            checkpoint_path = str(
-                resolve_model_path(
-                    self.models_dir, self.config.model_download_specs, "checkpoint"
-                )
-            )
-            from ltx_pipelines.utils.model_ledger import ModelLedger
-
-            ledger = ModelLedger(
-                dtype=torch.bfloat16,
-                device=torch.device("cpu"),   # patch loads to CPU then applies FP8
-                checkpoint_path=checkpoint_path,
-                gemma_root_path=gemma_root,
-            )
-            # patched_text_encoder: loads weights → CPU, applies FP8, stores in
-            # te.cached_encoder, returns the encoder.
-            encoder = ledger.text_encoder()  # type: ignore[assignment]
-
-            if encoder is None or type(encoder).__name__ == "DummyTextEncoder":
-                raise RuntimeError(
-                    "Failed to load Gemma text encoder — "
-                    "DummyTextEncoder returned unexpectedly during cold-start"
-                )
-
-        # ── 3. Move Gemma to GPU (VRAM is now free) ─────────────────────────
-        device = self.config.device
-        logger.info("Moving Gemma to %s for encoding", device)
-        encoder.to(device)
-        sync_device(device)
+        # ── 3. Ensure encoder is on the correct GPU ──────────────────────────
+        # Single-GPU: move to cuda:0 (VRAM just freed).
+        # Multi-GPU: encoder already on cuda:1 — use it in-place.
+        if is_multi_gpu:
+            device = torch.device("cuda:1")
+            logger.info("Multi-GPU: encoding on cuda:1 (no pipeline eject needed)")
+        else:
+            device = self.config.device
+            logger.info("Moving Gemma to %s for encoding", device)
+            encoder.to(device)
+            sync_device(device)
 
         v: torch.Tensor
         a: torch.Tensor | None
@@ -132,12 +144,14 @@ class EncodePromptHandler(StateHandlerBase):
             a = a_raw.to(device) if a_raw is not None else None
 
         finally:
-            # ── 5. Return Gemma to CPU and free VRAM ─────────────────────────
-            logger.info("Returning Gemma to CPU; freeing VRAM")
-            encoder.to("cpu")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            gc.collect()
+            # ── 5. Return Gemma to CPU (single-GPU only) ─────────────────────
+            # Multi-GPU: leave encoder resident on cuda:1 for subsequent calls.
+            if not is_multi_gpu:
+                logger.info("Returning Gemma to CPU; freeing VRAM")
+                encoder.to("cpu")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
 
         # ── 6. Cache the result ──────────────────────────────────────────────
         encoded = TextEncodingResult(video_context=v, audio_context=a)
@@ -158,17 +172,18 @@ class EncodePromptHandler(StateHandlerBase):
             te.api_embeddings = encoded
             te.encoded_prompt = prompt.strip()
 
-        logger.info(
-            "Prompt encoded on GPU and cached. Gemma returned to CPU. VRAM freed."
-        )
+        if is_multi_gpu:
+            logger.info("Prompt encoded on cuda:1 and cached (multi-GPU mode).")
+        else:
+            logger.info("Prompt encoded on GPU and cached. Gemma returned to CPU. VRAM freed.")
 
     def enhance_prompt(self, prompt: str) -> str:
         """Run Gemma's enhance_t2v on the prompt and return the enhanced text.
 
-        Unlike encode_prompt, this only calls the LM for text expansion — no
-        embeddings are computed or cached.  In multi-GPU mode the text encoder
-        is already resident on cuda:1 so this is fast.  In single-GPU mode the
-        pipeline is ejected and Gemma is moved to GPU for the call.
+        enhance_t2v uses HuggingFace generate() internally, which creates
+        intermediate tensors on CPU.  To avoid device-mismatch errors with
+        FP8-patched weights, we always move the encoder to CPU for this call
+        and restore it to its original device afterwards.
         """
         from typing import Any, cast
 
@@ -183,25 +198,7 @@ class EncodePromptHandler(StateHandlerBase):
                 "Download the text encoder or check Settings."
             )
 
-        encoder = te.cached_encoder
-        if encoder is None:
-            logger.info("Cold-start: loading Gemma text encoder for prompt enhancement…")
-            self._pipelines._install_text_patches_if_needed()
-            checkpoint_path = str(
-                resolve_model_path(
-                    self.models_dir, self.config.model_download_specs, "checkpoint"
-                )
-            )
-            from ltx_pipelines.utils.model_ledger import ModelLedger
-            ledger = ModelLedger(
-                dtype=torch.bfloat16,
-                device=torch.device("cpu"),
-                checkpoint_path=checkpoint_path,
-                gemma_root_path=gemma_root,
-            )
-            encoder = ledger.text_encoder()
-            if encoder is None or type(encoder).__name__ == "DummyTextEncoder":
-                raise RuntimeError("Failed to load Gemma text encoder")
+        encoder = self._get_or_load_encoder(gemma_root)
 
         if not hasattr(encoder, "enhance_t2v"):
             raise RuntimeError(
@@ -209,17 +206,21 @@ class EncodePromptHandler(StateHandlerBase):
                 "(enhance_t2v missing — is Gemma downloaded?)."
             )
 
-        # Multi-GPU: encoder already resident on cuda:1, use as-is.
-        # Single-GPU: eject the video pipeline and move encoder to GPU.
-        is_multi_gpu = self.state.app_settings.use_multi_gpu
-        moved_to_gpu = False
-        if not is_multi_gpu:
-            self._pipelines.unload_gpu_pipeline()
-            device = self.config.device
-            logger.info("Moving Gemma to %s for prompt enhancement", device)
-            encoder.to(device)
-            sync_device(device)
-            moved_to_gpu = True
+        # Determine original device so we can restore it after the call.
+        try:
+            original_device = next(iter(encoder.parameters())).device
+        except StopIteration:
+            original_device = torch.device("cpu")
+
+        needs_cpu = original_device.type != "cpu"
+        if needs_cpu:
+            logger.info(
+                "Moving Gemma from %s to CPU for enhance_t2v (HF generate requires CPU tensors)",
+                original_device,
+            )
+            encoder.to("cpu")
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(original_device)
 
         try:
             with torch.inference_mode():
@@ -232,9 +233,7 @@ class EncodePromptHandler(StateHandlerBase):
             )
             return enhanced_str
         finally:
-            if moved_to_gpu:
-                logger.info("Returning Gemma to CPU; freeing VRAM")
-                encoder.to("cpu")
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                gc.collect()
+            if needs_cpu:
+                logger.info("Restoring Gemma to %s after enhancement", original_device)
+                encoder.to(original_device)
+                sync_device(original_device)
