@@ -33,6 +33,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_multi_gpu(state: "AppState") -> bool:
+    return (
+        getattr(state.app_settings, "use_multi_gpu", False)
+        and torch.cuda.is_available()
+        and torch.cuda.device_count() >= 2
+    )
+
+
 class LTXTextEncoder:
     """Stateless text encoding operations with idempotent monkey-patching.
 
@@ -92,13 +100,6 @@ class LTXTextEncoder:
                         return _fwd
 
                     child.forward = _make_upcast_forward(child)  # type: ignore[assignment]
-
-            def _is_multi_gpu(state: AppState) -> bool:
-                return (
-                    getattr(state.app_settings, "use_multi_gpu", False)
-                    and torch.cuda.is_available()
-                    and torch.cuda.device_count() >= 2
-                )
 
             def patched_text_encoder(self_model_ledger: ModelLedger) -> object:
                 state = state_getter()
