@@ -115,16 +115,21 @@ class EncodePromptHandler(StateHandlerBase):
         encoder = self._get_or_load_encoder(gemma_root)
 
         # ── 3. Ensure encoder is on the correct GPU ──────────────────────────
-        # Single-GPU: move to cuda:0 (VRAM just freed).
-        # Multi-GPU: encoder already on cuda:1 — use it in-place.
-        if is_multi_gpu:
-            device = torch.device("cuda:1")
-            logger.info("Multi-GPU: encoding on cuda:1 (no pipeline eject needed)")
-        else:
-            device = self.config.device
-            logger.info("Moving Gemma to %s for encoding", device)
+        device = torch.device("cuda:1") if is_multi_gpu else self.config.device
+
+        # Always verify and move — device state may have changed since last call
+        # (e.g. mode switched between single/multi-GPU, or encoder returned to CPU).
+        try:
+            current_device = next(iter(encoder.parameters())).device
+        except StopIteration:
+            current_device = torch.device("cpu")
+
+        if current_device != device:
+            logger.info("Moving Gemma from %s to %s for encoding", current_device, device)
             encoder.to(device)
             sync_device(device)
+        else:
+            logger.info("Gemma already on %s, encoding in-place", device)
 
         v: torch.Tensor
         a: torch.Tensor | None
@@ -194,7 +199,7 @@ class EncodePromptHandler(StateHandlerBase):
             "You are a prompt enhancer for LTX-Video, a text-to-video AI model. "
             "Rewrite the user's prompt to be more detailed and cinematic. "
             "Describe motion, lighting, camera movement, and atmosphere vividly. "
-            "Keep it concise — 2 to 4 sentences maximum. "
+            "Keep the enhanced prompt under 250 words. "
             "Output only the enhanced prompt — no explanations, no preamble, no labels."
         )
 

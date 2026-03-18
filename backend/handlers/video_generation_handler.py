@@ -165,6 +165,17 @@ class VideoGenerationHandler(StateHandlerBase):
                 logger.info("Generation cancelled by user")
                 return GenerateVideoResponse(status="cancelled")
 
+            # After a CUDA OOM the GPU memory state is corrupted — any subsequent
+            # CUDA operation risks an access violation (Windows exit code 0xC0000005).
+            # Unload the pipeline immediately so VRAM is freed and the next generation
+            # starts clean rather than crashing the process.
+            if "out of memory" in str(e).lower():
+                logger.warning("CUDA OOM detected — unloading pipeline to recover VRAM")
+                try:
+                    self._pipelines.unload_gpu_pipeline()
+                except Exception:
+                    logger.warning("Pipeline unload after OOM failed", exc_info=True)
+
             raise HTTPError(500, str(e)) from e
 
     def generate_video(
