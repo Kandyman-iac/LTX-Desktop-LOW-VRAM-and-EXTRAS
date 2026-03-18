@@ -24,6 +24,7 @@ import { ICLoraPanel, CONDITIONING_TYPES, type ICLoraConditioningType } from '..
 import { useGenerationHistory, type HistoryEntry } from '../hooks/use-generation-history'
 import { useEncodePrompt } from '../hooks/use-encode-prompt'
 import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
+import { useEnhancedPromptHistory } from '../hooks/use-enhanced-prompt-history'
 import { OutputBrowser } from '../components/OutputBrowser'
 
 const DEFAULT_SETTINGS: GenerationSettings = {
@@ -59,6 +60,8 @@ export function Playground() {
   const { status, processStatus } = useBackend()
   const { isEncoding, encodedPrompt, encodeError, encodePrompt, clearEncoded } = useEncodePrompt()
   const { isEnhancing, enhanceError, enhancePrompt } = useEnhancePrompt()
+  const { history: enhanceHistory, addToHistory: addToEnhanceHistory, clearHistory: clearEnhanceHistory } = useEnhancedPromptHistory()
+  const [showEnhanceHistory, setShowEnhanceHistory] = useState(false)
 
   // Determine whether the manual Encode Prompt workflow is relevant.
   // Shown for any local text encoder setup (single-GPU or multi-GPU).
@@ -128,8 +131,19 @@ export function Playground() {
 
   // Sync editableEnhancedPrompt whenever a new enhanced prompt arrives from generation.
   useEffect(() => {
-    if (enhancedPrompt !== null) setEditableEnhancedPrompt(enhancedPrompt)
-  }, [enhancedPrompt])
+    if (enhancedPrompt !== null) {
+      setEditableEnhancedPrompt(enhancedPrompt)
+      addToEnhanceHistory(enhancedPrompt)
+    }
+  }, [enhancedPrompt, addToEnhanceHistory])
+
+  // Close enhance history dropdown on outside click
+  useEffect(() => {
+    if (!showEnhanceHistory) return
+    const handler = () => setShowEnhanceHistory(false)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showEnhanceHistory])
 
   const {
     submitRetake,
@@ -471,7 +485,10 @@ export function Playground() {
                 <button
                   onClick={async () => {
                     const result = await enhancePrompt(prompt)
-                    if (result !== null) setEditableEnhancedPrompt(result)
+                    if (result !== null) {
+                      setEditableEnhancedPrompt(result)
+                      addToEnhanceHistory(result)
+                    }
                   }}
                   disabled={isEnhancing || isBusy || !prompt.trim() || processStatus !== 'alive'}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -553,15 +570,53 @@ export function Playground() {
                     <Sparkles size={10} />
                     Enhanced prompt
                   </span>
-                  {editableEnhancedPrompt !== null && (
-                    <button
-                      onClick={() => setEditableEnhancedPrompt(null)}
-                      className="text-zinc-600 hover:text-zinc-400 transition-colors"
-                      title="Clear enhanced prompt"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {enhanceHistory.length > 0 && (
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowEnhanceHistory(v => !v)}
+                          className="text-zinc-500 hover:text-purple-400 transition-colors flex items-center gap-1"
+                          title="Enhanced prompt history"
+                        >
+                          <History size={12} />
+                          <span className="text-[10px]">{enhanceHistory.length}</span>
+                        </button>
+                        {showEnhanceHistory && (
+                          <div className="absolute right-0 top-5 z-50 w-80 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+                              <span className="text-[11px] text-zinc-400 font-medium">History ({enhanceHistory.length})</span>
+                              <button
+                                onClick={() => { clearEnhanceHistory(); setShowEnhanceHistory(false) }}
+                                className="text-[10px] text-zinc-600 hover:text-red-400 transition-colors"
+                              >
+                                Clear all
+                              </button>
+                            </div>
+                            <div className="max-h-60 overflow-y-auto">
+                              {enhanceHistory.map((item, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => { setEditableEnhancedPrompt(item); setShowEnhanceHistory(false) }}
+                                  className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 border-b border-zinc-800/50 last:border-0 transition-colors"
+                                >
+                                  <span className="line-clamp-2">{item}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {editableEnhancedPrompt !== null && (
+                      <button
+                        onClick={() => setEditableEnhancedPrompt(null)}
+                        className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                        title="Clear enhanced prompt"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <textarea
                   value={editableEnhancedPrompt ?? ''}
