@@ -205,7 +205,7 @@ class EncodePromptHandler(StateHandlerBase):
             ],
             "temperature": 0.7,
             "max_tokens": 200,
-            "stream": False,
+            "stream": True,  # stream tokens to avoid timeout on slow models
         }
 
         data = json.dumps(payload).encode("utf-8")
@@ -217,8 +217,24 @@ class EncodePromptHandler(StateHandlerBase):
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=180) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
+            chunks: list[str] = []
+            # timeout applies per socket read — resets with each incoming chunk,
+            # so slow generation won't timeout as long as tokens keep arriving.
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload_str = line[len("data:"):].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        chunk_obj = json.loads(payload_str)
+                        content = chunk_obj["choices"][0].get("delta", {}).get("content", "")
+                        if content:
+                            chunks.append(content)
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
         except urllib.error.URLError as exc:
             raise RuntimeError(
                 f"LM Studio not reachable at {lm_studio_url}. "
@@ -226,6 +242,8 @@ class EncodePromptHandler(StateHandlerBase):
                 "local server is enabled (port 1234)."
             ) from exc
 
-        enhanced = result["choices"][0]["message"]["content"].strip()
+        enhanced = "".join(chunks).strip()
+        if not enhanced:
+            raise RuntimeError("LM Studio returned an empty response — is a model loaded?")
         logger.info("Prompt enhanced via LM Studio: %r -> %r", prompt[:60], enhanced[:60])
         return enhanced
