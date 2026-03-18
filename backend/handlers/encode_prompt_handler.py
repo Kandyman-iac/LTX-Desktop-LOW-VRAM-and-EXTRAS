@@ -194,8 +194,8 @@ class EncodePromptHandler(StateHandlerBase):
             "You are a prompt enhancer for LTX-Video, a text-to-video AI model. "
             "Rewrite the user's prompt to be more detailed and cinematic. "
             "Describe motion, lighting, camera movement, and atmosphere vividly. "
-            "Keep the enhanced prompt under 250 words. "
-            "Output only the enhanced prompt — no explanations, no preamble."
+            "Keep it concise — 2 to 4 sentences maximum. "
+            "Output only the enhanced prompt — no explanations, no preamble, no labels."
         )
 
         payload = {
@@ -204,7 +204,7 @@ class EncodePromptHandler(StateHandlerBase):
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.7,
-            "max_tokens": 512,
+            "max_tokens": 200,
             "stream": False,
         }
 
@@ -217,7 +217,7 @@ class EncodePromptHandler(StateHandlerBase):
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=180) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise RuntimeError(
