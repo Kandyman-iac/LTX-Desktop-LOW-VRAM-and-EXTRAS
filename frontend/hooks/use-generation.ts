@@ -128,6 +128,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
     settings: GenerationSettings,
     audioPath?: string | null,
     negativePrompt: string = '',
+    enhancedPrompt: string | null = null,
   ) => {
     const statusMsg = settings.model === 'pro'
       ? 'Loading Pro model & generating...'
@@ -174,6 +175,9 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       }
       if (audioPath) {
         body.audioPath = audioPath
+      }
+      if (enhancedPrompt) {
+        body.enhancedPrompt = enhancedPrompt
       }
 
       // Poll for real progress from backend with time-based interpolation

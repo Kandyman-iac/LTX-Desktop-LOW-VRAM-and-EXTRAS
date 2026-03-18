@@ -209,7 +209,7 @@ export function Playground() {
       const imagePath = selectedImage ? fileUrlToPath(selectedImage) : null
       const audioPath = selectedAudio ? fileUrlToPath(selectedAudio) : null
       if (audioPath) effectiveVideoSettings.model = 'pro'
-      generate(prompt, imagePath, effectiveVideoSettings, audioPath, negativePrompt)
+      generate(prompt, imagePath, effectiveVideoSettings, audioPath, negativePrompt, editableEnhancedPrompt)
     }
   }
   

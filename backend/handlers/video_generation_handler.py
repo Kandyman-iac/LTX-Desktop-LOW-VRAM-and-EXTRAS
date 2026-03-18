@@ -143,6 +143,7 @@ class VideoGenerationHandler(StateHandlerBase):
             self._write_sidecar(
                 video_path=output_path,
                 prompt=req.prompt,
+                enhanced_prompt=req.enhancedPrompt,
                 negative_prompt=req.negativePrompt,
                 resolution=resolution,
                 width=width,
@@ -421,11 +422,13 @@ class VideoGenerationHandler(StateHandlerBase):
         camera_motion: str,
         model: str,
         seed: int,
+        enhanced_prompt: str | None = None,
     ) -> None:
         settings = self.state.app_settings
         sidecar = {
             "timestamp": datetime.now().isoformat(),
             "prompt": prompt,
+            "enhanced_prompt": enhanced_prompt,
             "negative_prompt": negative_prompt,
             "model": model,
             "resolution": resolution,
