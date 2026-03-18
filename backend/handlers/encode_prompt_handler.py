@@ -212,7 +212,7 @@ class EncodePromptHandler(StateHandlerBase):
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.7,
-            "max_tokens": 200,
+            "max_tokens": 400,
             "stream": True,  # stream tokens to avoid timeout on slow models
         }
 
