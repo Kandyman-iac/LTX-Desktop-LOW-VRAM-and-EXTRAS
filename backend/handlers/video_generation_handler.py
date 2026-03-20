@@ -121,7 +121,7 @@ class VideoGenerationHandler(StateHandlerBase):
         pre_built_images: list[ImageConditioningInput] | None = None
         image = None
         if req.conditioningImages:
-            pre_built_images = self._prepare_conditioning_images(req.conditioningImages, width, height)
+            pre_built_images = self._prepare_conditioning_images(req.conditioningImages, width, height, num_frames)
             logger.info("Multi-frame conditioning: %d images", len(pre_built_images))
         else:
             image_path = normalize_optional_path(req.imagePath)
@@ -188,11 +188,26 @@ class VideoGenerationHandler(StateHandlerBase):
 
             raise HTTPError(500, str(e)) from e
 
+    @staticmethod
+    def _raw_frame_to_latent_idx(raw_idx: int, num_frames: int) -> int:
+        """Convert a raw video frame index to a latent frame index (8:1 temporal compression).
+
+        frame_idx=0 → latent 0 (first)
+        frame_idx=-1 → latent (latent_frames - 1) (last)
+        frame_idx=N → latent N // 8, clamped to valid range
+        """
+        temporal_compression = 8
+        latent_frames = (num_frames - 1) // temporal_compression + 1
+        if raw_idx < 0:
+            return latent_frames - 1
+        return min(raw_idx // temporal_compression, latent_frames - 1)
+
     def _prepare_conditioning_images(
         self,
         conditioning: list[ConditioningImageRequest],
         width: int,
         height: int,
+        num_frames: int,
     ) -> list[ImageConditioningInput]:
         """Prepare multi-frame conditioning images: resize each and save to temp files."""
         result: list[ImageConditioningInput] = []
@@ -201,11 +216,13 @@ class VideoGenerationHandler(StateHandlerBase):
             if not ci_path or not Path(ci_path).exists():
                 logger.warning("Conditioning image not found, skipping: %s", ci.path)
                 continue
+            latent_idx = self._raw_frame_to_latent_idx(ci.frameIdx, num_frames)
             pil_img = self._prepare_image(ci_path, width, height)
             tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
             pil_img.save(tmp)
-            result.append(ImageConditioningInput(path=tmp, frame_idx=ci.frameIdx, strength=ci.strength))
-            logger.info("Conditioning frame: %s frame_idx=%d strength=%.2f", ci_path, ci.frameIdx, ci.strength)
+            result.append(ImageConditioningInput(path=tmp, frame_idx=latent_idx, strength=ci.strength))
+            logger.info("Conditioning frame: %s raw_idx=%d latent_idx=%d strength=%.2f",
+                        ci_path, ci.frameIdx, latent_idx, ci.strength)
         return result
 
     def generate_video(
