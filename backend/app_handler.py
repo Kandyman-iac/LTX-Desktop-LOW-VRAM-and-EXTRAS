@@ -16,6 +16,7 @@ from handlers import (
     ImageGenerationHandler,
     ModelsHandler,
     PipelinesHandler,
+    QueueHandler,
     SuggestGapPromptHandler,
     RetakeHandler,
     RuntimePolicyHandler,
@@ -178,6 +179,9 @@ class AppHandler:
             config=config,
             zit_api_client=zit_api_client,
         )
+
+        self.queue = QueueHandler()
+        self.queue.set_video_generation(self.video_generation)
 
         self.health = HealthHandler(
             state=self.state,

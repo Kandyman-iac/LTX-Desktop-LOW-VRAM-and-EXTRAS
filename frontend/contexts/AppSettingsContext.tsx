@@ -41,6 +41,10 @@ export interface AppSettings {
   vaeTemporalTileSize: number
   unloadTextEncoderAfterEncode: boolean
   enhancePromptLocally: boolean
+  distilledNumSteps: number
+  reloadPipelineEveryNGens: number
+  stgScale: number
+  stgBlockIndex: number
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -72,6 +76,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   vaeTemporalTileSize: 0,
   unloadTextEncoderAfterEncode: false,
   enhancePromptLocally: false,
+  distilledNumSteps: 8,
+  reloadPipelineEveryNGens: 0,
+  stgScale: 0,
+  stgBlockIndex: 19,
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -133,6 +141,10 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     vaeTemporalTileSize: data.vaeTemporalTileSize ?? DEFAULT_APP_SETTINGS.vaeTemporalTileSize,
     unloadTextEncoderAfterEncode: data.unloadTextEncoderAfterEncode ?? DEFAULT_APP_SETTINGS.unloadTextEncoderAfterEncode,
     enhancePromptLocally: data.enhancePromptLocally ?? DEFAULT_APP_SETTINGS.enhancePromptLocally,
+    distilledNumSteps: data.distilledNumSteps ?? DEFAULT_APP_SETTINGS.distilledNumSteps,
+    reloadPipelineEveryNGens: data.reloadPipelineEveryNGens ?? DEFAULT_APP_SETTINGS.reloadPipelineEveryNGens,
+    stgScale: data.stgScale ?? DEFAULT_APP_SETTINGS.stgScale,
+    stgBlockIndex: data.stgBlockIndex ?? DEFAULT_APP_SETTINGS.stgBlockIndex,
   }
 }
 

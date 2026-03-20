@@ -72,6 +72,7 @@ class VideoGenerationHandler(StateHandlerBase):
         self._pipelines = pipelines_handler
         self._text = text_handler
         self._ltx_api_client = ltx_api_client
+        self._completed_generation_count: int = 0
 
     def generate(self, req: GenerateVideoRequest) -> GenerateVideoResponse:
         if should_video_generate_with_ltx_api(
@@ -129,7 +130,7 @@ class VideoGenerationHandler(StateHandlerBase):
             self._generation.start_generation(generation_id)
 
             output_path = self.generate_video(
-                prompt=req.prompt,
+                prompt=req.enhancedPrompt or req.prompt,
                 image=image,
                 height=height,
                 width=width,
@@ -201,7 +202,18 @@ class VideoGenerationHandler(StateHandlerBase):
         if not resolve_model_path(self.models_dir, self.config.model_download_specs,"checkpoint").exists():
             raise RuntimeError("Models not downloaded. Please download the AI models first using the Model Status menu.")
 
-        total_steps = 8
+        settings = self.state.app_settings
+        total_steps = settings.distilled_num_steps
+
+        # OOM prevention: force pipeline eviction every N completions so
+        # VRAM fragmentation doesn't accumulate across generations.
+        reload_every = settings.reload_pipeline_every_n_gens
+        if reload_every > 0 and self._completed_generation_count > 0 and self._completed_generation_count % reload_every == 0:
+            logger.info(
+                "VRAM defrag: reloading pipeline after %d generations (reload_every=%d)",
+                self._completed_generation_count, reload_every,
+            )
+            self._pipelines.unload_gpu_pipeline()
 
         self._generation.update_progress("loading_model", 5, 0, total_steps)
         t_load_start = time.perf_counter()
@@ -223,7 +235,6 @@ class VideoGenerationHandler(StateHandlerBase):
         output_path = self._make_output_path()
 
         try:
-            settings = self.state.app_settings
             use_api_encoding = not self._text.should_use_local_encoding()
             if image is not None:
                 enhance = use_api_encoding and settings.prompt_enhancer_enabled_i2v
@@ -241,6 +252,7 @@ class VideoGenerationHandler(StateHandlerBase):
             height = round(height / 64) * 64
             width = round(width / 64) * 64
 
+            logger.info("[%s] Inference params: steps=%d stg_scale=%.2f stg_block=%d", gen_mode, settings.distilled_num_steps, settings.stg_scale, settings.stg_block_index)
             t_inference_start = time.perf_counter()
             pipeline_state.pipeline.generate(
                 prompt=enhanced_prompt,
@@ -251,6 +263,9 @@ class VideoGenerationHandler(StateHandlerBase):
                 frame_rate=fps,
                 images=images,
                 output_path=str(output_path),
+                num_steps=settings.distilled_num_steps,
+                stg_scale=settings.stg_scale,
+                stg_block_index=settings.stg_block_index,
             )
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)
@@ -265,6 +280,7 @@ class VideoGenerationHandler(StateHandlerBase):
                         gen_mode, t_total_end - t_total_start,
                         t_load_end - t_load_start, t_text_end - t_text_start, t_inference_end - t_inference_start)
 
+            self._completed_generation_count += 1
             self._generation.update_progress("complete", 100, total_steps, total_steps)
             return str(output_path)
         finally:

@@ -22,6 +22,7 @@ from _routes.ic_lora import router as ic_lora_router
 from _routes.image_gen import router as image_gen_router
 from _routes.models import router as models_router
 from _routes.outputs import router as outputs_router
+from _routes.queue import router as queue_router
 from _routes.suggest_gap_prompt import router as suggest_gap_prompt_router
 from _routes.retake import router as retake_router
 from _routes.runtime_policy import router as runtime_policy_router
@@ -122,5 +123,6 @@ def create_app(
     app.include_router(ic_lora_router)
     app.include_router(runtime_policy_router)
     app.include_router(outputs_router)
+    app.include_router(queue_router)
 
     return app

@@ -56,6 +56,7 @@ _CIVITAI_TRANSFORMER_PREFIXES = (
     "lora_unet_",
     "transformer.",
     "lora_transformer_",
+    "diffusion_model.",  # ComfyUI convention for LTX LoRAs
 )
 
 # Official Lightricks LoRAs use these prefixes.
@@ -127,10 +128,24 @@ def _remap_civitai_keys(
 def _remap_diffusers_keys(
     state_dict: dict[str, torch.Tensor],
 ) -> dict[str, torch.Tensor]:
-    """Remap diffusers lora_A/lora_B keys to lora_down/lora_up convention."""
+    """Remap diffusers / ComfyUI lora_A/lora_B keys to lora_down/lora_up convention.
+
+    Two prefix conventions exist in the wild:
+    - Diffusers: ``transformer.transformer_blocks.0.attn1.to_q.lora_A.weight``
+    - ComfyUI:   ``diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight``
+
+    The LTX transformer's ``named_parameters()`` (from velocity_model) does NOT
+    include either outer prefix — keys start with ``transformer_blocks.`` directly.
+    """
     remapped: dict[str, torch.Tensor] = {}
     for key, tensor in state_dict.items():
-        new_key = key.replace(".lora_A.weight", ".lora_down.weight")
+        new_key = key
+        # Strip leading module wrappers added by diffusers or ComfyUI.
+        if new_key.startswith("transformer."):
+            new_key = new_key[len("transformer."):]
+        elif new_key.startswith("diffusion_model."):
+            new_key = new_key[len("diffusion_model."):]
+        new_key = new_key.replace(".lora_A.weight", ".lora_down.weight")
         new_key = new_key.replace(".lora_B.weight", ".lora_up.weight")
         remapped[new_key] = tensor
     return remapped
@@ -200,7 +215,7 @@ class LoraService:
         """Apply loaded LoRAs to a ModelLedger instance.
 
         Attempts to use the ModelLedger's native loras= parameter first.
-        Falls back to direct weight patching if unavailable.
+        Falls back to forward-hook patching if unavailable.
         """
         if not loras:
             return
@@ -226,65 +241,97 @@ class LoraService:
                 "ltx_core LoRA loader unavailable (%s), falling back to direct merge",
                 exc,
             )
-            self._apply_direct_merge(model_ledger, loras)
+            transformer = model_ledger.transformer()
+            self.apply_hooks_to_transformer(transformer, loras)
 
-    def _apply_direct_merge(
+    def apply_hooks_to_transformer(
         self,
-        model_ledger: Any,
+        transformer: Any,
         loras: list[LoadedLora],
     ) -> None:
-        """Fallback: directly merge LoRA weights into transformer parameters."""
+        """Apply LoRAs via runtime forward hooks on an already-built transformer.
+
+        This is preferable to weight merging because:
+        - Works correctly with FP8 quantized weights (no re-quantization loss)
+        - Works with block swap (hooks survive device moves, weights loaded on demand)
+        - The LoRA delta is applied in the computation dtype (bf16) not storage dtype (fp8)
+
+        For each matched Linear, we patch its forward to compute:
+            out = base_forward(x) + scale * F.linear(F.linear(x, down), up)
+        """
+        import torch.nn.functional as F
+
         try:
-            transformer = model_ledger.transformer()
-            model_sd = dict(transformer.named_parameters())
+            # transformer() returns X0Model wrapping velocity_model.
+            # LoRA keys are in the velocity_model namespace.
+            lookup_module = getattr(transformer, "velocity_model", transformer)
+
+            # Build a map: module_name -> list of (down, up, scale)
+            lora_map: dict[str, list[tuple[torch.Tensor, torch.Tensor, float]]] = {}
 
             for lora in loras:
-                merged = 0
                 sd = lora.state_dict
                 keys = list(sd.keys())
-
-                # Find lora_down/lora_up pairs.
                 down_keys = [k for k in keys if k.endswith(".lora_down.weight")]
+
+                matched = 0
                 for down_key in down_keys:
                     up_key = down_key.replace(".lora_down.weight", ".lora_up.weight")
-                    base_key = down_key.replace(".lora_down.weight", ".weight")
-
                     if up_key not in sd:
                         continue
-                    if base_key not in model_sd:
-                        # Try without .weight suffix.
-                        base_key_alt = down_key.replace(".lora_down.weight", "")
-                        if base_key_alt not in model_sd:
-                            continue
-                        base_key = base_key_alt
+                    # module name = key without ".lora_down.weight"
+                    module_name = down_key[: -len(".lora_down.weight")]
 
-                    down = sd[down_key].to(self.device, dtype=torch.float32)
-                    up = sd[up_key].to(self.device, dtype=torch.float32)
+                    alpha_key = module_name + ".alpha"
+                    down_t = sd[down_key].float()
+                    alpha = sd[alpha_key].item() if alpha_key in sd else down_t.shape[0]
+                    scale = float(lora.strength * (alpha / down_t.shape[0]))
 
-                    # Check for alpha scaling.
-                    alpha_key = down_key.replace(".lora_down.weight", ".alpha")
-                    alpha = sd[alpha_key].item() if alpha_key in sd else down.shape[0]
-                    scale = lora.strength * (alpha / down.shape[0])
-
-                    # Compute delta = up @ down (rank decomposition).
-                    if down.dim() == 2 and up.dim() == 2:
-                        delta = (up @ down) * scale
-                    else:
-                        # Conv weights — flatten, multiply, reshape.
-                        delta = (up.flatten(1) @ down.flatten(1)) * scale
-                        delta = delta.reshape(up.shape[0], down.shape[1], *up.shape[2:])
-
-                    param = model_sd[base_key]
-                    param.data.add_(delta.to(param.dtype))
-                    merged += 1
+                    entry = (down_t, sd[up_key].float(), scale)
+                    lora_map.setdefault(module_name, []).append(entry)
+                    matched += 1
 
                 logger.info(
-                    "Direct merge: applied %d weight pairs from %s",
-                    merged,
+                    "LoRA hook: matched %d layers for %s",
+                    matched,
                     Path(lora.path).name,
                 )
+
+            # Install forward hooks on matched Linear layers.
+            hooked = 0
+            for name, module in lookup_module.named_modules():
+                entries = lora_map.get(name)
+                if not entries or not isinstance(module, torch.nn.Linear):
+                    continue
+
+                original_forward = module.forward
+                # Capture entries and original_forward in closure.
+                def _make_hooked_forward(
+                    orig_fwd: Any,
+                    _entries: list[tuple[torch.Tensor, torch.Tensor, float]],
+                ) -> Any:
+                    def hooked_forward(
+                        x: torch.Tensor, **kwargs: Any
+                    ) -> torch.Tensor:
+                        out = orig_fwd(x, **kwargs)
+                        for down, up, sc in _entries:
+                            d = down.to(device=x.device, dtype=x.dtype)
+                            u = up.to(device=x.device, dtype=x.dtype)
+                            # LoRA: out += up @ (down @ x^T) scaled
+                            out = out + F.linear(F.linear(x, d), u) * sc
+                        return out
+                    return hooked_forward
+
+                module.forward = _make_hooked_forward(original_forward, entries)
+                hooked += 1
+
+            logger.info(
+                "LoRA hooks installed on %d Linear layers (%d LoRAs)",
+                hooked,
+                len(loras),
+            )
         except Exception as exc:
-            logger.error("Direct LoRA merge failed: %s", exc, exc_info=True)
+            logger.error("LoRA hook install failed: %s", exc, exc_info=True)
 
     def _load_single(self, entry: LoraEntry) -> LoadedLora | None:
         path = Path(entry.path)

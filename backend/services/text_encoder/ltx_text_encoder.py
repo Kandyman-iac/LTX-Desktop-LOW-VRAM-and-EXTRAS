@@ -208,9 +208,14 @@ class LTXTextEncoder:
                 te_state = state.text_encoder
 
                 if te_state is not None and te_state.api_embeddings is not None:
-                    # API embeddings already on self.device (video GPU).
-                    video_context = te_state.api_embeddings.video_context
+                    # Move embeddings to the video GPU (self.device = cuda:0).
+                    # In multi-GPU mode they were encoded/cached on cuda:1 — if
+                    # we return them as-is the transformer cross-attention gets a
+                    # cuda:1/cuda:0 mismatch and raises a RuntimeError.
+                    video_context = te_state.api_embeddings.video_context.to(self.device)
                     audio_context = te_state.api_embeddings.audio_context
+                    if audio_context is not None:
+                        audio_context = audio_context.to(self.device)
                     num_prompts = len(prompts) if not isinstance(prompts, str) else 1
                     out: list[tuple[torch.Tensor, TensorOrNone]] = []
                     for i in range(num_prompts):

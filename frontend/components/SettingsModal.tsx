@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Download, Film, Folder, Info, KeyRound, Settings, Sliders, Sparkles, X, Zap } from 'lucide-react'
+import { AlertCircle, Check, Download, Film, Folder, Info, KeyRound, Plus, Settings, Sliders, Sparkles, X, Zap } from 'lucide-react'
 import React, { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import { useAppSettings, type AppSettings } from '../contexts/AppSettingsContext'
@@ -1008,14 +1008,65 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 </div>
 
                 <div className="bg-zinc-800/50 rounded-lg p-4 space-y-4">
-                  {/* Steps Info */}
+                  {/* Steps */}
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-sm text-white">Inference Steps</label>
-                      <p className="text-xs text-zinc-500">Fixed at 8 steps (built into distilled model)</p>
+                      <p className="text-xs text-zinc-500">Fewer = faster, lower quality. 8 = full quality</p>
                     </div>
-                    <span className="px-3 py-1.5 bg-zinc-700 rounded-lg text-sm text-zinc-400">8</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={settings.distilledNumSteps ?? 8}
+                      onChange={(e) => {
+                        const v = Math.max(1, Math.min(8, parseInt(e.target.value) || 8))
+                        onSettingsChange({ ...settings, distilledNumSteps: v })
+                      }}
+                      className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
                   </div>
+
+                  {/* STG Scale */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">STG Scale</label>
+                      <p className="text-xs text-zinc-500">0 = off. Improves prompt adherence (~2× slower). Try 0.5–1.5</p>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="0.1"
+                      value={settings.stgScale ?? 0}
+                      onChange={(e) => {
+                        const v = Math.max(0, Math.min(10, parseFloat(e.target.value) || 0))
+                        onSettingsChange({ ...settings, stgScale: v })
+                      }}
+                      className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
+                  </div>
+
+                  {/* STG Block Index — only show when STG is active */}
+                  {(settings.stgScale ?? 0) > 0 && (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm text-zinc-300">STG Block Index</label>
+                        <p className="text-xs text-zinc-500">Transformer block to perturb (0–27). Default 19 works well</p>
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        max="27"
+                        value={settings.stgBlockIndex ?? 19}
+                        onChange={(e) => {
+                          const v = Math.max(0, Math.min(27, parseInt(e.target.value) || 19))
+                          onSettingsChange({ ...settings, stgBlockIndex: v })
+                        }}
+                        className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
+                      />
+                    </div>
+                  )}
 
                   {/* Upscaler Toggle */}
                   <div className="flex items-center justify-between">
@@ -1040,7 +1091,9 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
 
                 {/* Summary */}
                 <div className="text-xs text-zinc-500">
-                  Current: 8 steps, {settings.fastModel?.useUpscaler !== false ? 'with upscaler (2-stage, recommended)' : 'native resolution (experimental)'}
+                  Current: {settings.distilledNumSteps ?? 8} steps
+                  {(settings.stgScale ?? 0) > 0 ? `, STG ${settings.stgScale} (block ${settings.stgBlockIndex ?? 19})` : ''}
+                  {', '}{settings.fastModel?.useUpscaler !== false ? 'with upscaler (2-stage, recommended)' : 'native resolution (experimental)'}
                 </div>
               </div>
 
@@ -1306,6 +1359,25 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${settings.unloadTextEncoderAfterEncode ? 'translate-x-4' : 'translate-x-1'}`} />
                     </button>
                   </div>
+
+                  {/* Pipeline reload interval (OOM prevention) */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs text-zinc-300">Reload Pipeline Every N Gens</label>
+                      <p className="text-xs text-zinc-500">0 = disabled. Force VRAM defrag after N generations to prevent OOM crashes (try 4–8)</p>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={settings.reloadPipelineEveryNGens ?? 0}
+                      onChange={(e) => {
+                        const v = Math.max(0, Math.min(100, parseInt(e.target.value) || 0))
+                        onSettingsChange({ ...settings, reloadPipelineEveryNGens: v })
+                      }}
+                      className="w-20 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-white text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
                 </div>
 
                 {/* Device overrides */}
@@ -1337,6 +1409,12 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   </div>
                 </div>
               </div>
+
+              {/* LoRA Manager */}
+              <LoraManager
+                value={settings.civitaiLoras ?? '[]'}
+                onChange={(v) => onSettingsChange({ ...settings, civitaiLoras: v })}
+              />
             </>
           )}
 
@@ -1584,3 +1662,120 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
 }
 
 export type { AppSettings, TabId as SettingsTabId }
+
+// ── LoRA Manager ─────────────────────────────────────────────────────────────
+
+interface LoraEntry {
+  path: string
+  strength: number
+  enabled: boolean
+}
+
+function parseLoras(json: string): LoraEntry[] {
+  try { return JSON.parse(json) as LoraEntry[] } catch { return [] }
+}
+
+function basename(p: string): string {
+  return p.replace(/\\/g, '/').split('/').pop() ?? p
+}
+
+function LoraManager({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const loras = parseLoras(value)
+
+  const save = (next: LoraEntry[]) => onChange(JSON.stringify(next))
+
+  const handleAdd = async () => {
+    const files = await window.electronAPI.showOpenFileDialog({
+      title: 'Select LoRA (.safetensors)',
+      filters: [{ name: 'LoRA weights', extensions: ['safetensors'] }],
+      properties: ['openFile', 'multiSelections'],
+    })
+    if (!files || files.length === 0) return
+    const newEntries: LoraEntry[] = files
+      .filter(f => !loras.some(l => l.path === f))
+      .map(f => ({ path: f, strength: 1.0, enabled: true }))
+    save([...loras, ...newEntries])
+  }
+
+  const handleRemove = (i: number) => save(loras.filter((_, idx) => idx !== i))
+
+  const handleToggle = (i: number) =>
+    save(loras.map((l, idx) => idx === i ? { ...l, enabled: !l.enabled } : l))
+
+  const handleStrength = (i: number, v: number) =>
+    save(loras.map((l, idx) => idx === i ? { ...l, strength: v } : l))
+
+  return (
+    <div className="space-y-3 pt-4 border-t border-zinc-800">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+          </svg>
+          <h3 className="text-sm font-semibold text-white">LoRA Manager</h3>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400">Experimental</span>
+        </div>
+        <button
+          onClick={() => { void handleAdd() }}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-700/40 rounded-lg transition-colors"
+        >
+          <Plus size={11} />
+          Add LoRA
+        </button>
+      </div>
+
+      <p className="text-xs text-zinc-500">
+        Load LTX-Video compatible LoRAs (.safetensors). CivitAI and diffusers formats are auto-detected.
+        Changes take effect on next pipeline load (restart required).
+      </p>
+
+      <div className="space-y-2">
+        {loras.length === 0 ? (
+          <p className="text-xs text-zinc-600 italic px-1">No LoRAs added. Click "Add LoRA" to pick a .safetensors file.</p>
+        ) : loras.map((lora, i) => (
+          <div key={i} className={`rounded-lg p-3 space-y-2 border transition-colors ${lora.enabled ? 'bg-zinc-800/60 border-zinc-700/50' : 'bg-zinc-900/40 border-zinc-800/30 opacity-60'}`}>
+            <div className="flex items-center gap-2">
+              {/* Enable toggle */}
+              <button
+                onClick={() => handleToggle(i)}
+                className={`relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${lora.enabled ? 'bg-violet-500' : 'bg-zinc-600'}`}
+                title={lora.enabled ? 'Disable LoRA' : 'Enable LoRA'}
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${lora.enabled ? 'translate-x-3' : 'translate-x-0'}`} />
+              </button>
+              {/* Filename */}
+              <span className="flex-1 text-xs text-zinc-300 truncate" title={lora.path}>
+                {basename(lora.path)}
+              </span>
+              {/* Remove */}
+              <button
+                onClick={() => handleRemove(i)}
+                className="text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
+                title="Remove LoRA"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            {/* Strength slider */}
+            <div className="flex items-center gap-2 pl-9">
+              <label className="text-[10px] text-zinc-500 w-12 flex-shrink-0">Strength</label>
+              <input
+                type="range"
+                min="0"
+                max="2"
+                step="0.05"
+                value={lora.strength}
+                onChange={(e) => handleStrength(i, parseFloat(e.target.value))}
+                disabled={!lora.enabled}
+                className="flex-1 accent-violet-500 disabled:opacity-40"
+              />
+              <span className="text-[10px] text-zinc-400 w-8 text-right flex-shrink-0">
+                {lora.strength.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

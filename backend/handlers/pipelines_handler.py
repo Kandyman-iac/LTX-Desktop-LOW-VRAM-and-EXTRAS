@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import torch
 from threading import RLock
@@ -88,6 +89,7 @@ class PipelinesHandler(StateHandlerBase):
             s.vae_temporal_tile_size,
             s.use_multi_gpu,
             s.transformer_device,
+            s.civitai_loras,
         )
 
     def _pipeline_matches_model_type(self, model_type: VideoPipelineModelType) -> bool:
@@ -162,6 +164,20 @@ class PipelinesHandler(StateHandlerBase):
             fp8_pre_quantized = str(_fp8_path)
             logger.info("Pre-quantized FP8 transformer found: %s", fp8_pre_quantized)
 
+        # Parse LoRA entries from settings JSON.
+        from services.lora_service import LoraEntry
+        lora_entries: list[LoraEntry] = []
+        if settings.civitai_loras:
+            try:
+                raw = json.loads(settings.civitai_loras)
+                lora_entries = [
+                    LoraEntry(**item)
+                    for item in raw
+                    if isinstance(item, dict) and item.get("path")
+                ]
+            except Exception:
+                logger.warning("Failed to parse civitai_loras setting — no LoRAs applied")
+
         pipeline = self._fast_video_pipeline_class.create(
             checkpoint_path,
             gemma_root,
@@ -175,6 +191,7 @@ class PipelinesHandler(StateHandlerBase):
             vae_spatial_tile_size=settings.vae_spatial_tile_size,
             vae_temporal_tile_size=settings.vae_temporal_tile_size,
             pre_quantized_transformer_path=fp8_pre_quantized,
+            loras=lora_entries or None,
         )
 
         state = VideoPipelineState(

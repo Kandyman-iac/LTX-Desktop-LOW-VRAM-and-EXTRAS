@@ -26,6 +26,8 @@ import { useEncodePrompt } from '../hooks/use-encode-prompt'
 import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
 import { useEnhancedPromptHistory } from '../hooks/use-enhanced-prompt-history'
 import { OutputBrowser } from '../components/OutputBrowser'
+import { useQueue } from '../hooks/use-queue'
+import { QueuePanel } from '../components/QueuePanel'
 
 const DEFAULT_SETTINGS: GenerationSettings = {
   model: 'fast',
@@ -58,6 +60,7 @@ export function Playground() {
   const historyEntries = useMemo(() => (showHistory ? getHistory() : []), [showHistory, getHistory])
 
   const { status, processStatus } = useBackend()
+  const { jobs: queueJobs, addToQueue, removeFromQueue } = useQueue()
   const { isEncoding, encodedPrompt, encodeError, encodePrompt, clearEncoded } = useEncodePrompt()
   const { isEnhancing, enhanceError, enhancePrompt } = useEnhancePrompt()
   const { history: enhanceHistory, addToHistory: addToEnhanceHistory, clearHistory: clearEnhanceHistory } = useEnhancedPromptHistory()
@@ -227,6 +230,16 @@ export function Playground() {
     }
   }
   
+  const handleAddToQueue = () => {
+    if (!prompt.trim() || mode === 'text-to-image' || isRetakeMode || isIcLoraMode) return
+    const effectiveVideoSettings = shouldVideoGenerateWithLtxApi
+      ? sanitizeForcedApiVideoSettings(settings)
+      : settings
+    const imagePath = selectedImage ? fileUrlToPath(selectedImage) : null
+    const audioPath = selectedAudio ? fileUrlToPath(selectedAudio) : null
+    void addToQueue(prompt, imagePath, effectiveVideoSettings, audioPath, negativePrompt)
+  }
+
   // Handle "Create video" from generated image
   const handleCreateVideoFromImage = () => {
     if (!imageUrl) {
@@ -571,42 +584,46 @@ export function Playground() {
                     Enhanced prompt
                   </span>
                   <div className="flex items-center gap-2">
-                    {enhanceHistory.length > 0 && (
-                      <div className="relative">
-                        <button
-                          onClick={() => setShowEnhanceHistory(v => !v)}
-                          className="text-zinc-500 hover:text-purple-400 transition-colors flex items-center gap-1"
-                          title="Enhanced prompt history"
-                        >
-                          <History size={12} />
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowEnhanceHistory(v => !v)}
+                        className="text-zinc-500 hover:text-purple-400 transition-colors flex items-center gap-1"
+                        title="Enhanced prompt history"
+                      >
+                        <History size={12} />
+                        {enhanceHistory.length > 0 && (
                           <span className="text-[10px]">{enhanceHistory.length}</span>
-                        </button>
-                        {showEnhanceHistory && (
-                          <div className="absolute right-0 top-5 z-50 w-80 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
-                            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-                              <span className="text-[11px] text-zinc-400 font-medium">History ({enhanceHistory.length})</span>
+                        )}
+                      </button>
+                      {showEnhanceHistory && (
+                        <div className="absolute right-0 top-5 z-50 w-80 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden" onMouseDown={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+                            <span className="text-[11px] text-zinc-400 font-medium">Enhanced history ({enhanceHistory.length})</span>
+                            {enhanceHistory.length > 0 && (
                               <button
                                 onClick={() => { clearEnhanceHistory(); setShowEnhanceHistory(false) }}
                                 className="text-[10px] text-zinc-600 hover:text-red-400 transition-colors"
                               >
                                 Clear all
                               </button>
-                            </div>
-                            <div className="max-h-60 overflow-y-auto">
-                              {enhanceHistory.map((item, i) => (
-                                <button
-                                  key={i}
-                                  onClick={() => { setEditableEnhancedPrompt(item); setShowEnhanceHistory(false) }}
-                                  className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 border-b border-zinc-800/50 last:border-0 transition-colors"
-                                >
-                                  <span className="line-clamp-2">{item}</span>
-                                </button>
-                              ))}
-                            </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    )}
+                          <div className="max-h-60 overflow-y-auto">
+                            {enhanceHistory.length === 0 ? (
+                              <p className="text-xs text-zinc-500 px-3 py-3">No enhanced prompts yet. Use Enhance or enable local enhancement.</p>
+                            ) : enhanceHistory.map((item, i) => (
+                              <button
+                                key={i}
+                                onClick={() => { setEditableEnhancedPrompt(item); setShowEnhanceHistory(false) }}
+                                className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 border-b border-zinc-800/50 last:border-0 transition-colors"
+                              >
+                                <span className="line-clamp-2">{item}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     {editableEnhancedPrompt !== null && (
                       <button
                         onClick={() => setEditableEnhancedPrompt(null)}
@@ -726,7 +743,24 @@ export function Playground() {
                 <Trash2 className="h-4 w-4" />
                 Clear all
               </Button>
-              
+
+              {!isRetakeMode && !isIcLoraMode && mode !== 'text-to-image' && (
+                <Button
+                  variant="outline"
+                  onClick={handleAddToQueue}
+                  disabled={!prompt.trim() || processStatus !== 'alive'}
+                  className="relative flex items-center gap-2 border-zinc-700 bg-zinc-800 text-white hover:bg-zinc-700 disabled:opacity-50"
+                  title="Add to queue"
+                >
+                  +Q
+                  {queueJobs.filter(j => j.status === 'pending' || j.status === 'running').length > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white">
+                      {queueJobs.filter(j => j.status === 'pending' || j.status === 'running').length}
+                    </span>
+                  )}
+                </Button>
+              )}
+
               {isGenerating ? (
                 <Button
                   onClick={cancel}
@@ -765,6 +799,8 @@ export function Playground() {
                 </Button>
               )}
             </div>
+
+            <QueuePanel jobs={queueJobs} onRemove={removeFromQueue} />
           </div>
         </div>
 

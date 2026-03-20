@@ -9,6 +9,7 @@ from typing import Final, cast
 import torch
 
 from api_types import ImageConditioningInput
+from services.lora_service import LoraEntry
 from services.ltx_pipeline_common import default_tiling_config, encode_video_output, video_chunks_number
 from services.services_utils import AudioOrNone, TilingConfigType, device_supports_fp8
 
@@ -30,6 +31,7 @@ class LTXFastVideoPipeline:
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
         pre_quantized_transformer_path: str = "",
+        loras: list[LoraEntry] | None = None,
     ) -> "LTXFastVideoPipeline":
         return LTXFastVideoPipeline(
             checkpoint_path=checkpoint_path,
@@ -44,6 +46,7 @@ class LTXFastVideoPipeline:
             vae_spatial_tile_size=vae_spatial_tile_size,
             vae_temporal_tile_size=vae_temporal_tile_size,
             pre_quantized_transformer_path=pre_quantized_transformer_path,
+            loras=loras,
         )
 
     def __init__(
@@ -60,6 +63,7 @@ class LTXFastVideoPipeline:
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
         pre_quantized_transformer_path: str = "",
+        loras: list[LoraEntry] | None = None,
     ) -> None:
         from ltx_core.quantization import QuantizationPolicy
         from ltx_pipelines.distilled import DistilledPipeline
@@ -101,6 +105,10 @@ class LTXFastVideoPipeline:
         # ── Install attention tiling ──
         if attention_tile_size > 0:
             self._install_attention_tiling(attention_tile_size)
+
+        # ── Apply LoRAs ──
+        if loras:
+            self._install_loras(loras)
 
     def _install_pre_quantized_transformer(self, fp8_path: str) -> None:
         """Replace the transformer builder with a pre-quantized FP8 file loader.
@@ -153,15 +161,13 @@ class LTXFastVideoPipeline:
                 blocks_on_gpu=blocks_on_gpu,
                 device=self._transformer_device,
             )
-            # Install on transformer after it's first loaded.
-            # We patch model_ledger.transformer() to install on first call.
+            # Wrap model_ledger.transformer() persistently so block swap is
+            # re-installed on every build (model_ledger never caches the model).
             original_transformer = self.pipeline.model_ledger.transformer
 
             def patched_transformer() -> torch.nn.Module:
                 t = original_transformer()
                 service.install(t)
-                # Restore original after first call.
-                self.pipeline.model_ledger.transformer = original_transformer
                 return t
 
             self.pipeline.model_ledger.transformer = patched_transformer
@@ -192,6 +198,89 @@ class LTXFastVideoPipeline:
                 "AttentionTiling install failed (%s)", exc
             )
 
+    def _install_loras(self, entries: list[LoraEntry]) -> None:
+        import logging
+        _log = logging.getLogger(__name__)
+        try:
+            from services.lora_service import LoraService
+            service = LoraService(device=self._transformer_device)
+            loaded = service.load_loras(entries)
+            if not loaded:
+                _log.warning("No LoRAs were successfully loaded")
+                return
+
+            # Wrap model_ledger.transformer() persistently so LoRA hooks are
+            # re-applied on every build (model_ledger never caches the model).
+            # At this point model_ledger.transformer may already be wrapped by
+            # _install_block_swap, so we chain on top of that.
+            _original_transformer_fn = self.pipeline.model_ledger.transformer
+
+            def _transformer_with_loras() -> torch.nn.Module:
+                t = _original_transformer_fn()
+                service.apply_hooks_to_transformer(t, loaded)
+                return t
+
+            self.pipeline.model_ledger.transformer = _transformer_with_loras
+            _log.info("LoRAs applied: %d loaded", len(loaded))
+        except Exception as exc:
+            _log.warning("LoRA install failed (%s)", exc)
+
+    @staticmethod
+    def _make_sigma_subset(num_steps: int) -> list[float]:
+        """Return a subset of the distilled sigma schedule for fewer denoising steps.
+
+        The full schedule has 8 steps (9 sigma values).  For fewer steps we pick
+        evenly spaced values from the full list, always including the first (1.0)
+        and last (0.0) so the denoising range stays correct.
+        """
+        full = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0]
+        n = len(full) - 1  # 8
+        if num_steps >= n:
+            return full
+        if num_steps <= 1:
+            return [full[0], full[-1]]
+        return [full[round(i * n / num_steps)] for i in range(num_steps + 1)]
+
+    @staticmethod
+    def _make_stg_denoising_func(stg_scale: float, stg_block_index: int):
+        """Return a drop-in replacement for simple_denoising_func that applies STG.
+
+        STG (Spatio-Temporal Guidance) improves prompt adherence by running a
+        second forward pass with a single transformer block's self-attention
+        replaced by identity, then steering away from that degraded prediction:
+            output = cond + stg_scale * (cond - perturbed)
+
+        No negative prompt is needed — cost is ~2× per step (one extra pass).
+        """
+        import logging as _logging
+        _stg_log = _logging.getLogger(__name__)
+
+        def _stg_func(video_context, audio_context, transformer):
+            _stg_log.info("STG denoising func invoked: scale=%.2f block=%d", stg_scale, stg_block_index)
+            from ltx_core.components.guiders import MultiModalGuiderFactory, MultiModalGuiderParams
+            from ltx_pipelines.utils.helpers import multi_modal_guider_factory_denoising_func
+
+            video_params = MultiModalGuiderParams(
+                cfg_scale=1.0,
+                stg_scale=stg_scale,
+                stg_blocks=[stg_block_index],
+            )
+            # No STG on audio — keep it simple / unperturbed.
+            audio_params = MultiModalGuiderParams(
+                cfg_scale=1.0,
+                stg_scale=0.0,
+                stg_blocks=[],
+            )
+            return multi_modal_guider_factory_denoising_func(
+                video_guider_factory=MultiModalGuiderFactory.constant(video_params),
+                audio_guider_factory=MultiModalGuiderFactory.constant(audio_params),
+                v_context=video_context,
+                a_context=audio_context,
+                transformer=transformer,
+            )
+
+        return _stg_func
+
     def _run_inference(
         self,
         prompt: str,
@@ -202,8 +291,12 @@ class LTXFastVideoPipeline:
         frame_rate: float,
         images: list[ImageConditioningInput],
         tiling_config: TilingConfigType,
+        num_steps: int = 8,
+        stg_scale: float = 0.0,
+        stg_block_index: int = 19,
     ) -> tuple[torch.Tensor | Iterator[torch.Tensor], AudioOrNone]:
         from ltx_pipelines.utils.args import ImageConditioningInput as _LtxImageInput
+        import ltx_pipelines.distilled as _distilled_mod
 
         # Release any fragmented reserved-but-unused CUDA memory before the
         # pipeline runs.  The transformer denoising loop leaves scattered
@@ -211,16 +304,31 @@ class LTXFastVideoPipeline:
         # a single ~316 MiB contiguous block) can hit OOM even when there is
         # nominally enough free VRAM.
         torch.cuda.empty_cache()
-        return self.pipeline(
-            prompt=prompt,
-            seed=seed,
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            frame_rate=frame_rate,
-            images=[_LtxImageInput(img.path, img.frame_idx, img.strength) for img in images],
-            tiling_config=tiling_config,
-        )
+
+        # Temporarily patch module-level names that DistilledPipeline.__call__
+        # reads at call time.  Always restore in the finally block.
+        _orig_sigmas = _distilled_mod.DISTILLED_SIGMA_VALUES
+        _orig_simple = _distilled_mod.simple_denoising_func
+
+        if num_steps < 8:
+            _distilled_mod.DISTILLED_SIGMA_VALUES = self._make_sigma_subset(num_steps)  # type: ignore[attr-defined]
+        if stg_scale > 0.0:
+            _distilled_mod.simple_denoising_func = self._make_stg_denoising_func(stg_scale, stg_block_index)  # type: ignore[attr-defined]
+
+        try:
+            return self.pipeline(
+                prompt=prompt,
+                seed=seed,
+                height=height,
+                width=width,
+                num_frames=num_frames,
+                frame_rate=frame_rate,
+                images=[_LtxImageInput(img.path, img.frame_idx, img.strength) for img in images],
+                tiling_config=tiling_config,
+            )
+        finally:
+            _distilled_mod.DISTILLED_SIGMA_VALUES = _orig_sigmas
+            _distilled_mod.simple_denoising_func = _orig_simple
 
     @torch.inference_mode()
     def generate(
@@ -233,6 +341,9 @@ class LTXFastVideoPipeline:
         frame_rate: float,
         images: list[ImageConditioningInput],
         output_path: str,
+        num_steps: int = 8,
+        stg_scale: float = 0.0,
+        stg_block_index: int = 19,
     ) -> None:
         tiling_config = default_tiling_config(
             spatial_tile_size=self._vae_spatial_tile_size,
@@ -247,6 +358,9 @@ class LTXFastVideoPipeline:
             frame_rate=frame_rate,
             images=images,
             tiling_config=tiling_config,
+            num_steps=num_steps,
+            stg_scale=stg_scale,
+            stg_block_index=stg_block_index,
         )
         chunks = video_chunks_number(num_frames, tiling_config)
         encode_video_output(video=video, audio=audio, fps=int(frame_rate), output_path=output_path, video_chunks_number_value=chunks)

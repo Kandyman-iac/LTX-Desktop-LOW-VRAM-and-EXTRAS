@@ -95,6 +95,19 @@ class AppSettings(SettingsBaseModel):
     # Run Gemma's built-in enhance_t2v() locally before encoding.
     # Uses the already-loaded model — no extra VRAM cost.
     enhance_prompt_locally: bool = False
+    # Number of denoising steps for the distilled (fast) pipeline.
+    # 8 = full quality, fewer steps = faster but lower quality.
+    distilled_num_steps: int = 8
+    # Force a full pipeline reload every N generations to defragment VRAM.
+    # 0 = disabled. Recommended: 4-8 if you hit OOM after multiple generations.
+    reload_pipeline_every_n_gens: int = 0
+    # Spatio-Temporal Guidance scale for the distilled pipeline.
+    # 0.0 = disabled. Typical range 0.5–2.0. Improves prompt adherence without
+    # a negative prompt — runs a second perturbed forward pass per step.
+    stg_scale: float = 0.0
+    # Transformer block index to perturb for STG (0-27 for LTX-Video 28-block model).
+    # Block 19 is the community-recommended default. Does nothing when stg_scale=0.
+    stg_block_index: int = 19
 
     @field_validator("block_swap_blocks_on_gpu", mode="before")
     @classmethod
@@ -115,6 +128,28 @@ class AppSettings(SettingsBaseModel):
     @classmethod
     def _clamp_locked_seed(cls, value: Any) -> int:
         return _clamp_int(value, minimum=0, maximum=2_147_483_647, default=42)
+
+    @field_validator("distilled_num_steps", mode="before")
+    @classmethod
+    def _clamp_distilled_num_steps(cls, value: Any) -> int:
+        return _clamp_int(value, minimum=1, maximum=8, default=8)
+
+    @field_validator("reload_pipeline_every_n_gens", mode="before")
+    @classmethod
+    def _clamp_reload_every_n_gens(cls, value: Any) -> int:
+        return _clamp_int(value, minimum=0, maximum=100, default=0)
+
+    @field_validator("stg_scale", mode="before")
+    @classmethod
+    def _clamp_stg_scale(cls, value: Any) -> float:
+        if value is None:
+            return 0.0
+        return max(0.0, min(10.0, float(value)))
+
+    @field_validator("stg_block_index", mode="before")
+    @classmethod
+    def _clamp_stg_block_index(cls, value: Any) -> int:
+        return _clamp_int(value, minimum=0, maximum=27, default=19)
 
 
 SettingsModelT = TypeVar("SettingsModelT", bound=SettingsBaseModel)
@@ -192,6 +227,10 @@ class SettingsResponse(SettingsBaseModel):
     vae_temporal_tile_size: int = 0
     unload_text_encoder_after_encode: bool = False
     enhance_prompt_locally: bool = False
+    distilled_num_steps: int = 8
+    reload_pipeline_every_n_gens: int = 0
+    stg_scale: float = 0.0
+    stg_block_index: int = 19
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:
