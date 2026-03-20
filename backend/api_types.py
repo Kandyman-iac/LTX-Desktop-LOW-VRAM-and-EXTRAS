@@ -225,6 +225,13 @@ class ErrorResponse(BaseModel):
 # ============================================================
 
 
+class ConditioningImageRequest(BaseModel):
+    """A single conditioning image for multi-frame generation."""
+    path: str
+    frameIdx: int = 0       # 0 = first frame, -1 = last frame, or specific frame number
+    strength: float = 1.0   # 0.0–1.0
+
+
 class GenerateVideoRequest(BaseModel):
     prompt: NonEmptyPrompt
     resolution: str = "512p"
@@ -239,6 +246,7 @@ class GenerateVideoRequest(BaseModel):
     aspectRatio: Literal["16:9", "9:16"] = "16:9"
     seed: int | None = None
     enhancedPrompt: str | None = None
+    conditioningImages: list[ConditioningImageRequest] | None = None  # multi-frame conditioning
 
 
 class GenerateImageRequest(BaseModel):

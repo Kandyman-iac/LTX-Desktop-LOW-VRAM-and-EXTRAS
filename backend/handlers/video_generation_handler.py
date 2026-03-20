@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from api_types import GenerateVideoRequest, GenerateVideoResponse, ImageConditioningInput, VideoCameraMotion
+from api_types import ConditioningImageRequest, GenerateVideoRequest, GenerateVideoResponse, ImageConditioningInput, VideoCameraMotion
 from _routes._errors import HTTPError
 from handlers.base import StateHandlerBase
 from handlers.generation_handler import GenerationHandler
@@ -116,11 +116,18 @@ class VideoGenerationHandler(StateHandlerBase):
 
         num_frames = self._compute_num_frames(duration, fps)
 
+        # Multi-frame conditioning: if conditioningImages provided, use those;
+        # otherwise fall back to single imagePath (backward compat).
+        pre_built_images: list[ImageConditioningInput] | None = None
         image = None
-        image_path = normalize_optional_path(req.imagePath)
-        if image_path:
-            image = self._prepare_image(image_path, width, height)
-            logger.info("Image: %s -> %sx%s", image_path, width, height)
+        if req.conditioningImages:
+            pre_built_images = self._prepare_conditioning_images(req.conditioningImages, width, height)
+            logger.info("Multi-frame conditioning: %d images", len(pre_built_images))
+        else:
+            image_path = normalize_optional_path(req.imagePath)
+            if image_path:
+                image = self._prepare_image(image_path, width, height)
+                logger.info("Image: %s -> %sx%s", image_path, width, height)
 
         generation_id = self._make_generation_id()
         seed = self._resolve_seed(req.seed)
@@ -139,6 +146,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 seed=seed,
                 camera_motion=req.cameraMotion,
                 negative_prompt=req.negativePrompt,
+                pre_built_images=pre_built_images,
             )
 
             self._write_sidecar(
@@ -180,6 +188,26 @@ class VideoGenerationHandler(StateHandlerBase):
 
             raise HTTPError(500, str(e)) from e
 
+    def _prepare_conditioning_images(
+        self,
+        conditioning: list[ConditioningImageRequest],
+        width: int,
+        height: int,
+    ) -> list[ImageConditioningInput]:
+        """Prepare multi-frame conditioning images: resize each and save to temp files."""
+        result: list[ImageConditioningInput] = []
+        for ci in conditioning:
+            ci_path = normalize_optional_path(ci.path)
+            if not ci_path or not Path(ci_path).exists():
+                logger.warning("Conditioning image not found, skipping: %s", ci.path)
+                continue
+            pil_img = self._prepare_image(ci_path, width, height)
+            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+            pil_img.save(tmp)
+            result.append(ImageConditioningInput(path=tmp, frame_idx=ci.frameIdx, strength=ci.strength))
+            logger.info("Conditioning frame: %s frame_idx=%d strength=%.2f", ci_path, ci.frameIdx, ci.strength)
+        return result
+
     def generate_video(
         self,
         prompt: str,
@@ -191,6 +219,7 @@ class VideoGenerationHandler(StateHandlerBase):
         seed: int,
         camera_motion: VideoCameraMotion,
         negative_prompt: str,
+        pre_built_images: list[ImageConditioningInput] | None = None,
     ) -> str:
         t_total_start = time.perf_counter()
         gen_mode = "i2v" if image is not None else "t2v"
@@ -227,7 +256,10 @@ class VideoGenerationHandler(StateHandlerBase):
 
         images: list[ImageConditioningInput] = []
         temp_image_path: str | None = None
-        if image is not None:
+        if pre_built_images is not None:
+            # Multi-frame path: temp files already created by _prepare_conditioning_images
+            images = pre_built_images
+        elif image is not None:
             temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
             image.save(temp_image_path)
             images = [ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0)]
@@ -287,6 +319,13 @@ class VideoGenerationHandler(StateHandlerBase):
             self._text.clear_api_embeddings()
             if temp_image_path and os.path.exists(temp_image_path):
                 os.unlink(temp_image_path)
+            if pre_built_images:
+                for img_input in pre_built_images:
+                    if os.path.exists(img_input.path):
+                        try:
+                            os.unlink(img_input.path)
+                        except OSError:
+                            pass
 
     def _generate_a2v(
         self, req: GenerateVideoRequest, duration: int, fps: int, *, audio_path: str

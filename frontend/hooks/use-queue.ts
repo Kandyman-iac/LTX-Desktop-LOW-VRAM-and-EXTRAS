@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { backendFetch } from '../lib/backend'
 import type { GenerationSettings } from '../components/SettingsPanel'
+import type { ConditioningFrame } from '../components/MultiFrameConditioningPanel'
 
 export interface QueuedJob {
   id: string
@@ -19,6 +20,7 @@ interface UseQueueResult {
     settings: GenerationSettings,
     audioPath?: string | null,
     negativePrompt?: string,
+    conditioningFrames?: ConditioningFrame[],
   ) => Promise<void>
   removeFromQueue: (jobId: string) => Promise<void>
   pendingCount: number
@@ -53,6 +55,7 @@ export function useQueue(): UseQueueResult {
     settings: GenerationSettings,
     audioPath?: string | null,
     negativePrompt = '',
+    conditioningFrames?: ConditioningFrame[],
   ) => {
     const body: Record<string, unknown> = {
       prompt,
@@ -66,7 +69,17 @@ export function useQueue(): UseQueueResult {
     }
     if (settings.seed != null) body.seed = settings.seed
     if (negativePrompt) body.negativePrompt = negativePrompt
-    if (imagePath) body.imagePath = imagePath
+    const activeFrames = conditioningFrames?.filter(f => f.imagePath)
+    if (activeFrames && activeFrames.length > 0) {
+      const totalFrames = Math.round(parseFloat(String(settings.duration)) * settings.fps)
+      body.conditioningImages = activeFrames.map(f => ({
+        path: f.imagePath!,
+        frameIdx: f.role === 'first' ? 0 : f.role === 'last' ? -1 : Math.round(totalFrames * f.position),
+        strength: f.strength,
+      }))
+    } else if (imagePath) {
+      body.imagePath = imagePath
+    }
     if (audioPath) body.audioPath = audioPath
 
     await backendFetch('/api/queue/add', {

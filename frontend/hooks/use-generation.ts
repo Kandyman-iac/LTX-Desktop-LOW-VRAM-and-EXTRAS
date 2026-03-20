@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import type { GenerationSettings } from '../components/SettingsPanel'
+import type { ConditioningFrame } from '../components/MultiFrameConditioningPanel'
 import { backendFetch } from '../lib/backend'
 import { useAppSettings } from '../contexts/AppSettingsContext'
 
@@ -35,7 +36,7 @@ export interface GenerationSuccessInfo {
 }
 
 interface UseGenerationReturn extends GenerationState {
-  generate: (prompt: string, imagePath: string | null, settings: GenerationSettings, audioPath?: string | null, negativePrompt?: string) => Promise<void>
+  generate: (prompt: string, imagePath: string | null, settings: GenerationSettings, audioPath?: string | null, negativePrompt?: string, enhancedPrompt?: string | null, conditioningFrames?: ConditioningFrame[]) => Promise<void>
   generateImage: (prompt: string, settings: GenerationSettings) => Promise<void>
   cancel: () => void
   reset: () => void
@@ -129,6 +130,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
     audioPath?: string | null,
     negativePrompt: string = '',
     enhancedPrompt: string | null = null,
+    conditioningFrames?: ConditioningFrame[],
   ) => {
     const statusMsg = settings.model === 'pro'
       ? 'Loading Pro model & generating...'
@@ -170,7 +172,16 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       if (negativePrompt) {
         body.negativePrompt = negativePrompt
       }
-      if (imagePath) {
+      // Multi-frame conditioning takes priority over single imagePath
+      const activeFrames = conditioningFrames?.filter(f => f.imagePath)
+      if (activeFrames && activeFrames.length > 0) {
+        const totalFrames = Math.round(parseFloat(String(settings.duration)) * settings.fps)
+        body.conditioningImages = activeFrames.map(f => ({
+          path: f.imagePath!,
+          frameIdx: f.role === 'first' ? 0 : f.role === 'last' ? -1 : Math.round(totalFrames * f.position),
+          strength: f.strength,
+        }))
+      } else if (imagePath) {
         body.imagePath = imagePath
       }
       if (audioPath) {

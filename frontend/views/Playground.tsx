@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film, CheckCircle, Cpu, AlertCircle, Wand2 } from 'lucide-react'
 import { logger } from '../lib/logger'
-import { ImageUploader } from '../components/ImageUploader'
+import { MultiFrameConditioningPanel, type ConditioningFrame } from '../components/MultiFrameConditioningPanel'
 import { AudioUploader } from '../components/AudioUploader'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { ImageResult } from '../components/ImageResult'
@@ -51,7 +51,9 @@ export function Playground() {
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [showNegativePrompt, setShowNegativePrompt] = useState(false)
-  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [conditioningFrames, setConditioningFrames] = useState<ConditioningFrame[]>([
+    { role: 'first', imagePath: null, imageUrl: null, strength: 1.0, position: 0 },
+  ])
   const [selectedAudio, setSelectedAudio] = useState<string | null>(null)
   const [settings, setSettings] = useState<GenerationSettings>(() => ({ ...DEFAULT_SETTINGS }))
   const [showHistory, setShowHistory] = useState(false)
@@ -221,12 +223,11 @@ export function Playground() {
       const effectiveVideoSettings = shouldVideoGenerateWithLtxApi
         ? sanitizeForcedApiVideoSettings(settings)
         : settings
-      // Auto-detect: if image is loaded → I2V, otherwise → T2V
+      // Auto-detect: if any conditioning image is loaded → I2V/multi-frame, otherwise → T2V
       if (!prompt.trim()) return
-      const imagePath = selectedImage ? fileUrlToPath(selectedImage) : null
       const audioPath = selectedAudio ? fileUrlToPath(selectedAudio) : null
       if (audioPath) effectiveVideoSettings.model = 'pro'
-      generate(prompt, imagePath, effectiveVideoSettings, audioPath, negativePrompt, editableEnhancedPrompt)
+      generate(prompt, null, effectiveVideoSettings, audioPath, negativePrompt, editableEnhancedPrompt, conditioningFrames)
     }
   }
   
@@ -235,9 +236,8 @@ export function Playground() {
     const effectiveVideoSettings = shouldVideoGenerateWithLtxApi
       ? sanitizeForcedApiVideoSettings(settings)
       : settings
-    const imagePath = selectedImage ? fileUrlToPath(selectedImage) : null
     const audioPath = selectedAudio ? fileUrlToPath(selectedAudio) : null
-    void addToQueue(prompt, imagePath, effectiveVideoSettings, audioPath, negativePrompt)
+    void addToQueue(prompt, null, effectiveVideoSettings, audioPath, negativePrompt, conditioningFrames)
   }
 
   // Handle "Create video" from generated image
@@ -247,8 +247,11 @@ export function Playground() {
       return
     }
 
-    // imageUrl is already a file:// URL — just pass it as the selected image path
-    setSelectedImage(imageUrl)
+    // imageUrl is a file:// URL — set it as the first frame
+    const imagePath = fileUrlToPath(imageUrl)
+    setConditioningFrames([
+      { role: 'first', imagePath, imageUrl, strength: 1.0, position: 0 },
+    ])
     setMode('image-to-video')
     generatedImageRef.current = imageUrl
   }
@@ -258,7 +261,7 @@ export function Playground() {
     setEditableEnhancedPrompt(null)
     setPrompt('')
     setNegativePrompt('')
-    setSelectedImage(null)
+    setConditioningFrames([{ role: 'first', imagePath: null, imageUrl: null, strength: 1.0, position: 0 }])
     setSelectedAudio(null)
     const baseDefaults = { ...DEFAULT_SETTINGS }
     const shouldSanitizeVideoSettings = shouldVideoGenerateWithLtxApi && mode !== 'text-to-image'
@@ -364,12 +367,12 @@ export function Playground() {
               showIcLora={!forceApiGenerations}
             />
 
-            {/* Image Upload - Always shown in video mode (optional: makes it I2V) */}
+            {/* Multi-frame conditioning — shown in video mode (first frame = I2V, add last/middle for guided motion) */}
             {isVideoMode && !isRetakeMode && (
               <>
-                <ImageUploader
-                  selectedImage={selectedImage}
-                  onImageSelect={setSelectedImage}
+                <MultiFrameConditioningPanel
+                  frames={conditioningFrames}
+                  onChange={setConditioningFrames}
                 />
                 <AudioUploader
                   selectedAudio={selectedAudio}
