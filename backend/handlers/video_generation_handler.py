@@ -147,6 +147,9 @@ class VideoGenerationHandler(StateHandlerBase):
                 camera_motion=req.cameraMotion,
                 negative_prompt=req.negativePrompt,
                 pre_built_images=pre_built_images,
+                num_steps_override=req.numSteps,
+                stg_scale_override=req.stgScale,
+                stg_block_index_override=req.stgBlockIndex,
             )
 
             self._write_sidecar(
@@ -237,6 +240,9 @@ class VideoGenerationHandler(StateHandlerBase):
         camera_motion: VideoCameraMotion,
         negative_prompt: str,
         pre_built_images: list[ImageConditioningInput] | None = None,
+        num_steps_override: int | None = None,
+        stg_scale_override: float | None = None,
+        stg_block_index_override: int | None = None,
     ) -> str:
         t_total_start = time.perf_counter()
         gen_mode = "i2v" if image is not None else "t2v"
@@ -249,7 +255,9 @@ class VideoGenerationHandler(StateHandlerBase):
             raise RuntimeError("Models not downloaded. Please download the AI models first using the Model Status menu.")
 
         settings = self.state.app_settings
-        total_steps = settings.distilled_num_steps
+        total_steps = num_steps_override if num_steps_override is not None else settings.distilled_num_steps
+        eff_stg_scale = stg_scale_override if stg_scale_override is not None else settings.stg_scale
+        eff_stg_block_index = stg_block_index_override if stg_block_index_override is not None else settings.stg_block_index
 
         # OOM prevention: force pipeline eviction every N completions so
         # VRAM fragmentation doesn't accumulate across generations.
@@ -301,7 +309,7 @@ class VideoGenerationHandler(StateHandlerBase):
             height = round(height / 64) * 64
             width = round(width / 64) * 64
 
-            logger.info("[%s] Inference params: steps=%d stg_scale=%.2f stg_block=%d", gen_mode, settings.distilled_num_steps, settings.stg_scale, settings.stg_block_index)
+            logger.info("[%s] Inference params: steps=%d stg_scale=%.2f stg_block=%d", gen_mode, total_steps, eff_stg_scale, eff_stg_block_index)
             t_inference_start = time.perf_counter()
             pipeline_state.pipeline.generate(
                 prompt=enhanced_prompt,
@@ -312,9 +320,9 @@ class VideoGenerationHandler(StateHandlerBase):
                 frame_rate=fps,
                 images=images,
                 output_path=str(output_path),
-                num_steps=settings.distilled_num_steps,
-                stg_scale=settings.stg_scale,
-                stg_block_index=settings.stg_block_index,
+                num_steps=total_steps,
+                stg_scale=eff_stg_scale,
+                stg_block_index=eff_stg_block_index,
             )
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)

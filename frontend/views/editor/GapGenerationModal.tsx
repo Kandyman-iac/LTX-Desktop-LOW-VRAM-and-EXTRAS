@@ -1,7 +1,7 @@
 import React, { useMemo, useEffect, useState, useRef } from 'react'
 import {
   X, Upload, Video, Image,
-  Loader2, Sparkles, RefreshCw, Info
+  Loader2, Sparkles, RefreshCw, Info, ChevronDown
 } from 'lucide-react'
 import { SettingsPanel } from '../../components/SettingsPanel'
 import type { GenerationSettings } from '../../components/SettingsPanel'
@@ -44,6 +44,15 @@ interface GapGenerationModalProps {
   regenerateSuggestion: () => void
   gapSuggestionError?: boolean
   gapSuggestionNoApiKey?: boolean
+  gapNegativePrompt: string
+  setGapNegativePrompt: (v: string) => void
+  // Frame conditioning
+  gapStartFrameEnabled: boolean
+  setGapStartFrameEnabled: (v: boolean) => void
+  gapEndFrameEnabled: boolean
+  setGapEndFrameEnabled: (v: boolean) => void
+  setGapStartFrameOverridePath: (path: string | null) => void
+  setGapEndFrameOverridePath: (path: string | null) => void
 }
 
 export function GapGenerationModal({
@@ -73,7 +82,15 @@ export function GapGenerationModal({
   regenerateSuggestion,
   gapSuggestionError,
   gapSuggestionNoApiKey,
+  gapNegativePrompt,
+  setGapNegativePrompt,
   anchorPosition,
+  gapStartFrameEnabled,
+  setGapStartFrameEnabled,
+  gapEndFrameEnabled,
+  setGapEndFrameEnabled,
+  setGapStartFrameOverridePath,
+  setGapEndFrameOverridePath,
 }: GapGenerationModalProps) {
   if (!selectedGap) return null
 
@@ -109,33 +126,33 @@ export function GapGenerationModal({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [gapGenerateMode, setGapGenerateMode, regenReset, setSelectedGap])
 
-  const [startFrameEnabled, setStartFrameEnabled] = useState(true)
-  const [endFrameEnabled, setEndFrameEnabled] = useState(false)
-  const [startFrameOverride, setStartFrameOverride] = useState<string | null>(null)
-  const [endFrameOverride, setEndFrameOverride] = useState<string | null>(null)
+  const [showNegPrompt, setShowNegPrompt] = useState(false)
+  // Local display-URL for override frames (thumbnails only); paths go to parent via setGap*OverridePath
+  const [startFrameOverrideUrl, setStartFrameOverrideUrl] = useState<string | null>(null)
+  const [endFrameOverrideUrl, setEndFrameOverrideUrl] = useState<string | null>(null)
   const startFrameInputRef = useRef<HTMLInputElement>(null)
   const endFrameInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    setStartFrameEnabled(true)
-    setEndFrameEnabled(false)
-    setStartFrameOverride(null)
-    setEndFrameOverride(null)
+    setStartFrameOverrideUrl(null)
+    setEndFrameOverrideUrl(null)
+    setGapStartFrameOverridePath(null)
+    setGapEndFrameOverridePath(null)
   }, [gapGenerateMode])
 
-  const displayedBeforeFrame = startFrameOverride ?? gapBeforeFrame
-  const displayedAfterFrame = endFrameOverride ?? gapAfterFrame
+  const displayedBeforeFrame = startFrameOverrideUrl ?? gapBeforeFrame
+  const displayedAfterFrame = endFrameOverrideUrl ?? gapAfterFrame
 
   const handleFrameFileChange = (
     e: React.ChangeEvent<HTMLInputElement>,
-    setter: (v: string | null) => void,
-    onSelect: () => void
+    setUrlState: (v: string | null) => void,
+    setPathState: (v: string | null) => void,
   ) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => { setter(ev.target?.result as string); onSelect() }
-    reader.readAsDataURL(file)
+    const electronPath = (file as any).path as string | undefined
+    setUrlState(electronPath ? `file:///${electronPath.replace(/\\/g, '/')}` : URL.createObjectURL(file))
+    if (electronPath) setPathState(electronPath)
     e.target.value = ''
   }
 
@@ -181,30 +198,27 @@ export function GapGenerationModal({
                     <Info className="h-3 w-3 text-zinc-600 cursor-help" />
                     <div className="absolute left-0 top-full mt-2 w-60 p-2.5 bg-zinc-800 border border-zinc-700 rounded-lg text-[10px] text-zinc-300 leading-relaxed invisible group-hover/info:visible opacity-0 group-hover/info:opacity-100 transition-opacity pointer-events-none shadow-xl z-20">
                       {isVideoMode ? (
-                        <>
-                          <p>Only one conditioning frame can be used at a time.</p>
-                          <p className="mt-1.5">If <strong className="text-white">End frame</strong> is selected, it will be treated as the start frame, since the model does not currently support generating from an end frame. The video will then be generated from that frame and played in reverse.</p>
-                        </>
+                        <p>Toggle which neighbouring frames to use as conditioning. Both can be active simultaneously for first-frame + last-frame generation.</p>
                       ) : (
                         <p>Select frames from adjacent clips to provide context for the prompt.</p>
                       )}
                     </div>
                   </div>
                 </div>
-                {/* Segmented toggle */}
+                {/* Independent toggles — both can be active simultaneously */}
                 <div className="flex bg-zinc-800 rounded-lg p-0.5 gap-0.5">
                   <button
-                    onClick={() => { if (startFrameEnabled) { setStartFrameEnabled(false) } else { setStartFrameEnabled(true); setEndFrameEnabled(false) } }}
+                    onClick={() => setGapStartFrameEnabled(!gapStartFrameEnabled)}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                      startFrameEnabled ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                      gapStartFrameEnabled ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
                     Start frame
                   </button>
                   <button
-                    onClick={() => { if (endFrameEnabled) { setEndFrameEnabled(false) } else { setEndFrameEnabled(true); setStartFrameEnabled(false) } }}
+                    onClick={() => setGapEndFrameEnabled(!gapEndFrameEnabled)}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                      endFrameEnabled ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                      gapEndFrameEnabled ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
                     End frame
@@ -218,13 +232,13 @@ export function GapGenerationModal({
                 {displayedBeforeFrame ? (
                   <div
                     className="relative w-[38%] h-full flex-shrink-0 overflow-hidden rounded-l-xl group/before cursor-pointer"
-                    onClick={() => { if (startFrameEnabled) { setStartFrameEnabled(false) } else { setStartFrameEnabled(true); setEndFrameEnabled(false) } }}
+                    onClick={() => setGapStartFrameEnabled(!gapStartFrameEnabled)}
                   >
                     <img
                       src={displayedBeforeFrame}
                       alt=""
                       className={`w-full h-full object-cover transition-all duration-300 ${
-                        !startFrameEnabled ? 'grayscale opacity-50' : ''
+                        !gapStartFrameEnabled ? 'grayscale opacity-50' : ''
                       }`}
                     />
                     {/* Replace button */}
@@ -240,7 +254,7 @@ export function GapGenerationModal({
                       </div>
                     </div>
                     {/* Selection border */}
-                    {startFrameEnabled && (
+                    {gapStartFrameEnabled && (
                       <div className="absolute inset-0 rounded-l-xl border-2 border-blue-500 pointer-events-none" />
                     )}
                   </div>
@@ -284,13 +298,13 @@ export function GapGenerationModal({
                 {displayedAfterFrame ? (
                   <div
                     className="relative w-[38%] h-full flex-shrink-0 overflow-hidden rounded-r-xl group/after cursor-pointer"
-                    onClick={() => { if (endFrameEnabled) { setEndFrameEnabled(false) } else { setEndFrameEnabled(true); setStartFrameEnabled(false) } }}
+                    onClick={() => setGapEndFrameEnabled(!gapEndFrameEnabled)}
                   >
                     <img
                       src={displayedAfterFrame}
                       alt=""
                       className={`w-full h-full object-cover transition-all duration-300 ${
-                        !endFrameEnabled ? 'grayscale opacity-50' : ''
+                        !gapEndFrameEnabled ? 'grayscale opacity-50' : ''
                       }`}
                     />
                     {/* Replace button */}
@@ -306,7 +320,7 @@ export function GapGenerationModal({
                       </div>
                     </div>
                     {/* Selection border */}
-                    {endFrameEnabled && (
+                    {gapEndFrameEnabled && (
                       <div className="absolute inset-0 rounded-r-xl border-2 border-blue-500 pointer-events-none" />
                     )}
                   </div>
@@ -397,6 +411,28 @@ export function GapGenerationModal({
                 )}
               </div>
 
+              {/* Negative prompt (collapsible) */}
+              <div>
+                <button
+                  onClick={() => setShowNegPrompt(v => !v)}
+                  className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <ChevronDown className={`h-3 w-3 transition-transform ${showNegPrompt ? '' : '-rotate-90'}`} />
+                  Negative prompt
+                  {gapNegativePrompt && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />}
+                </button>
+                {showNegPrompt && (
+                  <textarea
+                    value={gapNegativePrompt}
+                    onChange={(e) => setGapNegativePrompt(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    placeholder="Describe what to avoid..."
+                    className="mt-1.5 w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-sm text-white resize-none focus:outline-none focus:ring-1 focus:border-blue-500/50 focus:ring-blue-500/30 placeholder-zinc-600"
+                    rows={2}
+                  />
+                )}
+              </div>
+
               {/* Settings */}
               <div className="[&_select]:h-8 [&_select]:text-xs [&_select]:py-1 [&_label]:text-[10px] [&_label]:mb-1">
                 <SettingsPanel
@@ -439,7 +475,7 @@ export function GapGenerationModal({
                   <div className="h-1.5 bg-zinc-700 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                      style={{ width: `${regenProgress * 100}%` }}
+                      style={{ width: `${regenProgress}%` }}
                     />
                   </div>
                 </div>
@@ -553,14 +589,14 @@ export function GapGenerationModal({
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => handleFrameFileChange(e, setStartFrameOverride, () => { setStartFrameEnabled(true); setEndFrameEnabled(false) })}
+        onChange={(e) => { handleFrameFileChange(e, setStartFrameOverrideUrl, setGapStartFrameOverridePath); setGapStartFrameEnabled(true) }}
       />
       <input
         ref={endFrameInputRef}
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => handleFrameFileChange(e, setEndFrameOverride, () => { setEndFrameEnabled(true); setStartFrameEnabled(false) })}
+        onChange={(e) => { handleFrameFileChange(e, setEndFrameOverrideUrl, setGapEndFrameOverridePath); setGapEndFrameEnabled(true) }}
       />
     </>
   )

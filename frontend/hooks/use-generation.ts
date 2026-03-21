@@ -169,6 +169,9 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       if (settings.seed != null) {
         body.seed = settings.seed
       }
+      if (settings.numSteps != null) body.numSteps = settings.numSteps
+      if (settings.stgScale != null) body.stgScale = settings.stgScale
+      if (settings.stgBlockIndex != null) body.stgBlockIndex = settings.stgBlockIndex
       if (negativePrompt) {
         body.negativePrompt = negativePrompt
       }

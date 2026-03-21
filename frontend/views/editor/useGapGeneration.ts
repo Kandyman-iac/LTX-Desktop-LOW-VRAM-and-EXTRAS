@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { TimelineClip, Track, SubtitleClip, Asset } from '../../types/project'
 import { DEFAULT_COLOR_CORRECTION } from '../../types/project'
 import type { GenerationSettings } from '../../components/SettingsPanel'
+import type { ConditioningFrame } from '../../components/MultiFrameConditioningPanel'
 import { copyToAssetFolder } from '../../lib/asset-copy'
 import { backendFetch } from '../../lib/backend'
 import { fileUrlToPath } from '../../lib/url-to-path'
@@ -15,7 +16,7 @@ export interface UseGapGenerationParams {
   currentProjectId: string | null
   addAsset: (projectId: string, asset: Omit<Asset, 'id' | 'createdAt'>) => Asset
   resolveClipSrc: (clip: TimelineClip | null) => string
-  regenGenerate: (prompt: string, imagePath: string | null, settings: GenerationSettings) => Promise<void>
+  regenGenerate: (prompt: string, imagePath: string | null, settings: GenerationSettings, audioPath?: string | null, negativePrompt?: string, enhancedPrompt?: string | null, conditioningFrames?: ConditioningFrame[]) => Promise<void>
   regenGenerateImage: (prompt: string, settings: GenerationSettings) => Promise<void>
   regenVideoUrl: string | null
   regenVideoPath: string | null
@@ -57,6 +58,7 @@ export function useGapGeneration({
   const gapGenerateModeRef = useRef(gapGenerateMode)
   gapGenerateModeRef.current = gapGenerateMode
   const [gapPrompt, setGapPrompt] = useState('')
+  const [gapNegativePrompt, setGapNegativePrompt] = useState('')
   const [gapSettings, setGapSettings] = useState<GenerationSettings>({
     model: 'fast',
     duration: 5,
@@ -66,7 +68,8 @@ export function useGapGeneration({
     cameraMotion: 'none',
     imageResolution: '1080p',
     imageAspectRatio: '16:9',
-    imageSteps: 30,
+    imageSteps: 4,
+    seed: null,
   })
   const [gapImageFile, setGapImageFile] = useState<File | null>(null)
   const gapImageInputRef = useRef<HTMLInputElement>(null)
@@ -95,6 +98,14 @@ export function useGapGeneration({
   // Frames extracted from neighboring clips for the gap animation header
   const [gapBeforeFrame, setGapBeforeFrame] = useState<string | null>(null)
   const [gapAfterFrame, setGapAfterFrame] = useState<string | null>(null)
+  // Filesystem paths for the extracted frames (used by the API — separate from display URLs)
+  const [gapBeforeFramePath, setGapBeforeFramePath] = useState<string | null>(null)
+  const [gapAfterFramePath, setGapAfterFramePath] = useState<string | null>(null)
+  // Frame conditioning toggle state (lifted from modal so handleGapGenerate can read them)
+  const [gapStartFrameEnabled, setGapStartFrameEnabled] = useState(true)
+  const [gapEndFrameEnabled, setGapEndFrameEnabled] = useState(false)
+  const [gapStartFrameOverridePath, setGapStartFrameOverridePath] = useState<string | null>(null)
+  const [gapEndFrameOverridePath, setGapEndFrameOverridePath] = useState<string | null>(null)
 
   // --- Gap detection: find empty spaces between clips on each non-subtitle track ---
   const timelineGaps = useMemo(() => {
@@ -177,6 +188,19 @@ export function useGapGeneration({
     setSelectedGap(null)
     setGapGenerateMode(null)
     
+    // Build first/last frame conditioning frames (T2V only, not API)
+    const conditioningFrames: ConditioningFrame[] = []
+    if (mode === 'text-to-video') {
+      const startPath = gapStartFrameOverridePath ?? gapBeforeFramePath
+      const endPath = gapEndFrameOverridePath ?? gapAfterFramePath
+      if (gapStartFrameEnabled && startPath) {
+        conditioningFrames.push({ role: 'first', imagePath: startPath, imageUrl: null, strength: 1.0, position: 0 })
+      }
+      if (gapEndFrameEnabled && endPath) {
+        conditioningFrames.push({ role: 'last', imagePath: endPath, imageUrl: null, strength: 1.0, position: 1 })
+      }
+    }
+
     try {
       if (mode === 'text-to-image') {
         await regenGenerateImage(finalPrompt, settings)
@@ -198,13 +222,18 @@ export function useGapGeneration({
             imagePath = tmpPath
           }
         }
-        await regenGenerate(finalPrompt, imagePath, settings)
+        await regenGenerate(finalPrompt, imagePath, settings, null, gapNegativePrompt, null,
+          conditioningFrames.length > 0 ? conditioningFrames : undefined)
       }
     } catch (err) {
       console.error('Gap generation failed:', err)
       setGeneratingGap(null)
+      regenReset()
     }
-  }, [selectedGap, gapGenerateMode, gapPrompt, gapSettings, gapImageFile, gapApplyAudioToTrack, currentProjectId, regenGenerate, regenGenerateImage])
+  }, [selectedGap, gapGenerateMode, gapPrompt, gapNegativePrompt, gapSettings, gapImageFile, gapApplyAudioToTrack, currentProjectId,
+      gapStartFrameEnabled, gapEndFrameEnabled, gapStartFrameOverridePath, gapEndFrameOverridePath,
+      gapBeforeFramePath, gapAfterFramePath,
+      regenGenerate, regenGenerateImage, regenReset])
 
   // When generation completes, place the result in the gap
   useEffect(() => {
@@ -443,6 +472,8 @@ export function useGapGeneration({
 
       if (beforeFrameUrl) setGapBeforeFrame(beforeFrameUrl)
       if (afterFrameUrl) setGapAfterFrame(afterFrameUrl)
+      if (beforeFrame) setGapBeforeFramePath(beforeFrame)
+      if (afterFrame) setGapAfterFramePath(afterFrame)
       
       if (!beforeFrame && !afterFrame && !beforePrompt && !afterPrompt) {
         setGapSuggesting(false)
@@ -520,6 +551,12 @@ export function useGapGeneration({
       setGapSuggestionNoApiKey(false)
       setGapBeforeFrame(null)
       setGapAfterFrame(null)
+      setGapBeforeFramePath(null)
+      setGapAfterFramePath(null)
+      setGapStartFrameEnabled(true)
+      setGapEndFrameEnabled(false)
+      setGapStartFrameOverridePath(null)
+      setGapEndFrameOverridePath(null)
       gapSuggestionAbortRef.current?.abort()
       suggestionFiredKeyRef.current = null
       return
@@ -571,6 +608,8 @@ export function useGapGeneration({
     gapGenerateModeRef,
     gapPrompt,
     setGapPrompt,
+    gapNegativePrompt,
+    setGapNegativePrompt,
     gapSettings,
     setGapSettings,
     gapImageFile,
@@ -582,6 +621,14 @@ export function useGapGeneration({
     gapSuggestionNoApiKey,
     gapBeforeFrame,
     gapAfterFrame,
+    gapStartFrameEnabled,
+    setGapStartFrameEnabled,
+    gapEndFrameEnabled,
+    setGapEndFrameEnabled,
+    gapStartFrameOverridePath,
+    setGapStartFrameOverridePath,
+    gapEndFrameOverridePath,
+    setGapEndFrameOverridePath,
     gapApplyAudioToTrack,
     setGapApplyAudioToTrack,
     regenerateSuggestion,

@@ -10,6 +10,11 @@ export interface QueuedJob {
   result_path: string | null
   error: string | null
   created_at: number
+  resolution: string
+  duration: string
+  fps: string
+  model: string
+  aspect_ratio: string
 }
 
 interface UseQueueResult {

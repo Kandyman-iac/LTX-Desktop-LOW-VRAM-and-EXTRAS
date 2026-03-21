@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Play, Pause, Square, SkipBack, SkipForward, ChevronLeft, ChevronRight, Video, Music, X } from 'lucide-react'
+import { Play, Pause, Square, SkipBack, SkipForward, ChevronLeft, ChevronRight, Video, Music, X, GripHorizontal } from 'lucide-react'
 import type { Asset } from '../../types/project'
 import { formatTime } from './video-editor-utils'
 import { Tooltip } from '../../components/ui/tooltip'
@@ -23,6 +23,7 @@ export interface SourceMonitorProps {
   sourceVideoRef: React.RefObject<HTMLVideoElement | null>
   onInsertEdit: () => void
   onOverwriteEdit: () => void
+  onSourceDragStart: (e: React.DragEvent) => void
 }
 
 export function SourceMonitor({
@@ -43,8 +44,10 @@ export function SourceMonitor({
   sourceVideoRef,
   onInsertEdit,
   onOverwriteEdit,
+  onSourceDragStart,
 }: SourceMonitorProps) {
   const [sourceReversePlaying, setSourceReversePlaying] = useState(false)
+  const [videoCtxMenu, setVideoCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const reverseRafRef = useRef<number | null>(null)
   const reverseLastRef = useRef<number | null>(null)
 
@@ -88,14 +91,24 @@ export function SourceMonitor({
         </Tooltip>
       </div>
       {/* Video Area */}
-      <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center min-h-0">
+      <div
+        className="flex-1 relative overflow-hidden bg-black flex items-center justify-center min-h-0 select-none"
+        draggable={!!sourceAsset}
+        onDragStart={sourceAsset ? onSourceDragStart : undefined}
+        onContextMenu={(e) => {
+          if (!sourceAsset) return
+          e.preventDefault()
+          setVideoCtxMenu({ x: e.clientX, y: e.clientY })
+        }}
+        onClick={() => setVideoCtxMenu(null)}
+      >
         {sourceAsset ? (
           <>
             {sourceAsset.type === 'video' ? (
               <video
                 ref={sourceVideoRef as React.RefObject<HTMLVideoElement>}
                 src={sourceAsset.url}
-                className="max-w-full max-h-full object-contain"
+                className="max-w-full max-h-full object-contain pointer-events-none"
                 onTimeUpdate={() => {
                   if (sourceVideoRef.current) setSourceTime(sourceVideoRef.current.currentTime)
                 }}
@@ -103,19 +116,46 @@ export function SourceMonitor({
                 playsInline
               />
             ) : sourceAsset.type === 'image' ? (
-              <img src={sourceAsset.url} alt="" className="max-w-full max-h-full object-contain" />
+              <img src={sourceAsset.url} alt="" className="max-w-full max-h-full object-contain pointer-events-none" />
             ) : (
-              <div className="text-center text-zinc-500">
+              <div className="text-center text-zinc-500 pointer-events-none">
                 <Music className="h-12 w-12 mx-auto mb-2" />
                 <p className="text-sm">{sourceAsset.path?.split('/').pop() || 'Audio'}</p>
               </div>
             )}
-            {/* Timecode overlays moved to bottom status bar */}
+            {/* Drag hint */}
+            <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 text-[9px] text-zinc-600 pointer-events-none">
+              <GripHorizontal className="h-2.5 w-2.5" />
+              <span>drag to timeline</span>
+            </div>
           </>
         ) : (
           <div className="text-center text-zinc-600">
             <Video className="h-10 w-10 mx-auto mb-2" />
             <p className="text-xs">Double-click an asset to load it here</p>
+          </div>
+        )}
+        {/* Right-click context menu */}
+        {videoCtxMenu && (
+          <div
+            className="fixed bg-zinc-800 border border-zinc-700 rounded-lg shadow-2xl py-1 z-[80] min-w-[170px] text-xs"
+            style={{ left: videoCtxMenu.x, top: videoCtxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => { onInsertEdit(); setVideoCtxMenu(null) }}
+              className="w-full text-left px-3 py-1.5 text-zinc-300 hover:bg-zinc-700 flex items-center justify-between gap-3"
+            >
+              <span>Insert at playhead</span>
+              <span className="text-zinc-500 font-mono">,</span>
+            </button>
+            <button
+              onClick={() => { onOverwriteEdit(); setVideoCtxMenu(null) }}
+              className="w-full text-left px-3 py-1.5 text-zinc-300 hover:bg-zinc-700 flex items-center justify-between gap-3"
+            >
+              <span>Overwrite at playhead</span>
+              <span className="text-zinc-500 font-mono">.</span>
+            </button>
           </div>
         )}
       </div>

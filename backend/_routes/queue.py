@@ -36,6 +36,11 @@ def route_queue_list(
                 "error": j.error,
                 "created_at": j.created_at,
                 "prompt": j.request.prompt[:80],
+                "resolution": j.request.resolution,
+                "duration": j.request.duration,
+                "fps": j.request.fps,
+                "model": j.request.model,
+                "aspect_ratio": j.request.aspectRatio,
             }
             for j in jobs
         ]

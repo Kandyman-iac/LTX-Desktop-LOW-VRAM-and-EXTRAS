@@ -26,13 +26,13 @@ import { MenuBar, type MenuDefinition } from '../components/MenuBar'
 import { ImportTimelineModal } from '../components/ImportTimelineModal'
 import { ClipWaveform } from '../components/AudioWaveform'
 import type { TimelineClip, Track, SubtitleClip } from '../types/project' // EFFECTS HIDDEN: removed EffectType
-import { DEFAULT_TRACKS } from '../types/project' // EFFECTS HIDDEN: removed EFFECT_DEFINITIONS
+import { DEFAULT_TRACKS, DEFAULT_COLOR_CORRECTION } from '../types/project' // EFFECTS HIDDEN: removed EFFECT_DEFINITIONS
 import {
   type ToolType, PRIMARY_TOOLS, TRIM_TOOLS,
   AUTOSAVE_DELAY, CUT_POINT_TOLERANCE, DEFAULT_DISSOLVE_DURATION,
   type EditorLayout, DEFAULT_LAYOUT, LAYOUT_LIMITS,
   getShortcutLabel, tooltipLabel, loadLayout, saveLayout, clampVal,
-  migrateClip, migrateTracks, // EFFECTS HIDDEN: removed getClipEffectStyles
+  migrateClip, migrateTracks, resolveOverlaps, // EFFECTS HIDDEN: removed getClipEffectStyles
   formatTime, parseTime, getColorLabel,
   type LayoutPreset, loadLayoutPresets, saveLayoutPresets,
 } from './editor/video-editor-utils'
@@ -469,6 +469,7 @@ export function VideoEditor() {
     sourceSplitPercent, setSourceSplitPercent,
     sourceVideoRef, sourceTimeRef, sourceIsPlayingRef,
     loadSourceAsset,
+    handleSourceDragStart,
     handleInsertEdit,
     handleOverwriteEdit,
   } = useSourceMonitor({ currentTime, tracks, pushUndo, setClips })
@@ -984,9 +985,11 @@ export function VideoEditor() {
   // Gap generation hook (state + logic extracted)
   const {
     selectedGap, setSelectedGap, gapGenerateMode, setGapGenerateMode, gapGenerateModeRef,
-    gapPrompt, setGapPrompt, gapSettings, setGapSettings,
+    gapPrompt, setGapPrompt, gapNegativePrompt, setGapNegativePrompt, gapSettings, setGapSettings,
     gapImageFile, setGapImageFile, gapImageInputRef,
     gapSuggesting, gapSuggestion, gapSuggestionError, gapSuggestionNoApiKey, gapBeforeFrame, gapAfterFrame,
+    gapStartFrameEnabled, setGapStartFrameEnabled, gapEndFrameEnabled, setGapEndFrameEnabled,
+    setGapStartFrameOverridePath, setGapEndFrameOverridePath,
     gapApplyAudioToTrack, setGapApplyAudioToTrack,
     regenerateSuggestion,
     generatingGap, regenProgress: gapRegenProgress,
@@ -1923,6 +1926,7 @@ export function VideoEditor() {
               sourceVideoRef={sourceVideoRef}
               onInsertEdit={handleInsertEdit}
               onOverwriteEdit={handleOverwriteEdit}
+              onSourceDragStart={handleSourceDragStart}
             />
           )}
           
@@ -2842,8 +2846,8 @@ export function VideoEditor() {
                   }}
                   className="relative"
                   onDragOver={(e) => {
-                    // Allow asset/timeline drops anywhere on the timeline area
-                    if (e.dataTransfer.types.includes('assetid') || e.dataTransfer.types.includes('assetids') || e.dataTransfer.types.includes('asset') || e.dataTransfer.types.includes('timeline')) {
+                    // Allow asset/timeline/source-monitor drops anywhere on the timeline area
+                    if (e.dataTransfer.types.includes('assetid') || e.dataTransfer.types.includes('assetids') || e.dataTransfer.types.includes('asset') || e.dataTransfer.types.includes('timeline') || e.dataTransfer.types.includes('sourcemonitordrag')) {
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'copy'
                     }
@@ -2865,6 +2869,67 @@ export function VideoEditor() {
                       }
                       accY += th
                       droppedTrackIndex = entry.realIndex
+                    }
+                    // Source monitor drag: create trimmed clip at drop position
+                    const srcMonData = e.dataTransfer.getData('sourcemonitordrag')
+                    if (srcMonData) {
+                      e.preventDefault()
+                      try {
+                        const { assetId, trimStart, trimEnd, insertDuration } = JSON.parse(srcMonData)
+                        const asset = assets.find(a => a.id === assetId)
+                        const track = tracks[droppedTrackIndex]
+                        if (!asset || !track || track.locked) return
+                        const scrollLeft = container.scrollLeft
+                        const startTime = Math.max(0, (e.clientX - rect.left + scrollLeft) / pixelsPerSecond)
+                        const videoClipId = `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                        const audioClipId = `clip-${Date.now()}-a-${Math.random().toString(36).substr(2, 9)}`
+                        const baseClip = {
+                          assetId: asset.id,
+                          startTime,
+                          duration: insertDuration,
+                          trimStart,
+                          trimEnd,
+                          speed: 1,
+                          reversed: false,
+                          muted: false,
+                          volume: 1,
+                          asset,
+                          flipH: false as const,
+                          flipV: false as const,
+                          transitionIn: { type: 'none' as const, duration: 0.5 },
+                          transitionOut: { type: 'none' as const, duration: 0.5 },
+                          colorCorrection: { ...DEFAULT_COLOR_CORRECTION },
+                          opacity: 100,
+                        }
+                        const newClips: import('../types/project').TimelineClip[] = []
+                        const isAudio = asset.type === 'audio'
+                        if (isAudio) {
+                          newClips.push({ ...baseClip, id: audioClipId, type: 'audio', trackIndex: droppedTrackIndex })
+                        } else {
+                          const audioTrackIndex = tracks.findIndex(t => t.kind === 'audio' && !t.locked && t.sourcePatched !== false)
+                          const needsAudio = asset.type === 'video' && audioTrackIndex >= 0
+                          newClips.push({
+                            ...baseClip,
+                            id: videoClipId,
+                            type: asset.type === 'video' ? 'video' : 'image',
+                            trackIndex: droppedTrackIndex,
+                            ...(needsAudio ? { linkedClipIds: [audioClipId] } : {}),
+                          })
+                          if (needsAudio) {
+                            newClips.push({
+                              ...baseClip,
+                              id: audioClipId,
+                              type: 'audio',
+                              trackIndex: audioTrackIndex,
+                              linkedClipIds: [videoClipId],
+                            })
+                          }
+                        }
+                        const newIds = new Set(newClips.map(c => c.id))
+                        pushUndo()
+                        setClips(prev => resolveOverlaps([...prev, ...newClips], newIds))
+                      } catch { /* ignore parse errors */ }
+                      return
                     }
                     handleTrackDrop(e, droppedTrackIndex)
                   }}
@@ -3970,6 +4035,7 @@ export function VideoEditor() {
             currentProjectId={currentProjectId}
             pushAssetUndoRef={pushAssetUndoRef}
             addClipToTimeline={addClipToTimeline}
+            loadSourceAsset={loadSourceAsset}
             handleRegenerate={(id) => handleRegenerate(id)}
             handleCancelRegeneration={handleCancelRegeneration}
             setAssetActiveTake={setAssetActiveTake}
@@ -4152,6 +4218,14 @@ export function VideoEditor() {
           regenerateSuggestion={regenerateSuggestion}
           gapSuggestionError={gapSuggestionError}
           gapSuggestionNoApiKey={gapSuggestionNoApiKey}
+          gapNegativePrompt={gapNegativePrompt}
+          setGapNegativePrompt={setGapNegativePrompt}
+          gapStartFrameEnabled={gapStartFrameEnabled}
+          setGapStartFrameEnabled={setGapStartFrameEnabled}
+          gapEndFrameEnabled={gapEndFrameEnabled}
+          setGapEndFrameEnabled={setGapEndFrameEnabled}
+          setGapStartFrameOverridePath={setGapStartFrameOverridePath}
+          setGapEndFrameOverridePath={setGapEndFrameOverridePath}
         />
       )}
 

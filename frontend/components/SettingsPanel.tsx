@@ -22,6 +22,9 @@ export interface GenerationSettings {
   imageAspectRatio: string
   imageSteps: number
   variations?: number  // Number of image variations to generate
+  numSteps?: number       // Per-generation inference step override
+  stgScale?: number       // Per-generation STG scale override
+  stgBlockIndex?: number  // Per-generation STG block index override
 }
 
 interface SettingsPanelProps {
@@ -192,7 +195,7 @@ export function SettingsPanel({
 
       {/* Seed */}
       {!forceApiGenerations && (
-        <SeedRow seed={settings.seed} onChange={(v) => handleChange('seed', v)} disabled={disabled} />
+        <SeedRow seed={settings.seed} onChange={(v) => onSettingsChange({ ...settings, seed: v })} disabled={disabled} />
       )}
 
       {/* Audio and Camera Motion Row */}

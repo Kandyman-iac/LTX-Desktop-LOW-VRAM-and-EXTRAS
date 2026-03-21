@@ -170,7 +170,7 @@ export function MultiFrameConditioningPanel({ frames, onChange }: MultiFrameCond
   const lastFrame = frames.find(f => f.role === 'last')
 
   const update = (role: ConditioningFrame['role'], index: number, updates: Partial<ConditioningFrame>) => {
-    onChange(frames.map((f, i) => {
+    onChange(frames.map((f) => {
       if (f.role !== role) return f
       const roleFrames = frames.filter(x => x.role === role)
       const targetFrame = roleFrames[index]
@@ -192,7 +192,7 @@ export function MultiFrameConditioningPanel({ frames, onChange }: MultiFrameCond
 
   const removeMiddleFrame = (idx: number) => {
     const updated = [...frames]
-    const mIdx = updated.findIndex((f, i) => f.role === 'middle' && frames.filter(x => x.role === 'middle').indexOf(f) === idx)
+    const mIdx = updated.findIndex((f) => f.role === 'middle' && frames.filter(x => x.role === 'middle').indexOf(f) === idx)
     updated.splice(mIdx, 1)
     onChange(updated)
   }

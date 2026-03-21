@@ -38,6 +38,25 @@ export function useSourceMonitor({ currentTime, tracks, pushUndo, setClips }: Us
   const sourceOutRef = useRef(sourceOut)
   sourceOutRef.current = sourceOut
 
+  // --- Drag from source monitor to timeline ---
+  const handleSourceDragStart = useCallback((e: React.DragEvent) => {
+    const asset = sourceAssetRef.current
+    if (!asset) return
+    const sIn = sourceInRef.current ?? 0
+    const sDuration = asset.duration || 5
+    const sOut = sourceOutRef.current ?? sDuration
+    const insertDuration = sOut - sIn
+    if (insertDuration <= 0) return
+    e.dataTransfer.setData('sourcemonitordrag', JSON.stringify({
+      assetId: asset.id,
+      trimStart: sIn,
+      trimEnd: sDuration - sOut,
+      insertDuration,
+    }))
+    e.dataTransfer.setData('assetId', asset.id)
+    e.dataTransfer.effectAllowed = 'copy'
+  }, [])
+
   const loadSourceAsset = useCallback((asset: Asset) => {
     setSourceAsset(asset)
     setSourceTime(0)
@@ -192,6 +211,7 @@ export function useSourceMonitor({ currentTime, tracks, pushUndo, setClips }: Us
     sourceSplitPercent, setSourceSplitPercent,
     sourceVideoRef, sourceAnimRef, sourceTimeRef, sourceIsPlayingRef,
     loadSourceAsset,
+    handleSourceDragStart,
     handleInsertEdit,
     handleOverwriteEdit,
   }

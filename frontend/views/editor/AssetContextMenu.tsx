@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, X, RefreshCw, ChevronLeft, ChevronRight, Layers, GitMerge, FolderPlus, Folder, Trash2, FolderOpen } from 'lucide-react'
+import { Plus, X, RefreshCw, ChevronLeft, ChevronRight, Layers, GitMerge, FolderPlus, Folder, Trash2, FolderOpen, MonitorPlay } from 'lucide-react'
 import type { Asset } from '../../types/project'
 import { COLOR_LABELS } from './video-editor-utils'
 
@@ -15,6 +15,7 @@ export interface AssetContextMenuProps {
   currentProjectId: string | null
   pushAssetUndoRef: React.RefObject<() => void>
   addClipToTimeline: (asset: Asset, trackIndex?: number, startTime?: number) => void
+  loadSourceAsset?: (asset: Asset) => void
   handleRegenerate: (assetId: string) => void
   handleCancelRegeneration: () => void
   setAssetActiveTake: (projectId: string, assetId: string, takeIndex: number) => void
@@ -40,6 +41,7 @@ export function AssetContextMenu({
   currentProjectId,
   pushAssetUndoRef,
   addClipToTimeline,
+  loadSourceAsset,
   handleRegenerate,
   handleCancelRegeneration,
   setAssetActiveTake,
@@ -77,6 +79,19 @@ export function AssetContextMenu({
         >
           <Plus className="h-3.5 w-3.5 text-zinc-500" />
           <span>Add to Timeline</span>
+        </button>
+      )}
+
+      {!isMulti && loadSourceAsset && (asset.type === 'video' || asset.type === 'audio' || asset.type === 'image') && (
+        <button
+          onClick={() => {
+            loadSourceAsset(asset)
+            setAssetContextMenu(null)
+          }}
+          className="w-full text-left px-3 py-1.5 text-zinc-300 hover:bg-zinc-700 flex items-center gap-3"
+        >
+          <MonitorPlay className="h-3.5 w-3.5 text-zinc-500" />
+          <span>Open in Clip Viewer</span>
         </button>
       )}
 

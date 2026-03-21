@@ -247,6 +247,9 @@ class GenerateVideoRequest(BaseModel):
     seed: int | None = None
     enhancedPrompt: str | None = None
     conditioningImages: list[ConditioningImageRequest] | None = None  # multi-frame conditioning
+    numSteps: int | None = None        # per-request override for distilledNumSteps
+    stgScale: float | None = None     # per-request override for stgScale
+    stgBlockIndex: int | None = None  # per-request override for stgBlockIndex
 
 
 class GenerateImageRequest(BaseModel):

@@ -68,7 +68,8 @@ export function useRegeneration(params: UseRegenerationParams) {
     cameraMotion: 'none',
     imageResolution: '1080p',
     imageAspectRatio: '16:9',
-    imageSteps: 30,
+    imageSteps: 4,
+    seed: null,
   })
 
   useEffect(() => {
@@ -286,6 +287,7 @@ export function useRegeneration(params: UseRegenerationParams) {
         imageAspectRatio: params.imageAspectRatio || '16:9',
         imageSteps: params.imageSteps || 4,
         variations: 1,
+        seed: null,
       })
     } else {
       // For video generation (T2V or I2V)
@@ -304,6 +306,7 @@ export function useRegeneration(params: UseRegenerationParams) {
         imageResolution: '1080p',
         imageAspectRatio: params.imageAspectRatio || '16:9',
         imageSteps: params.imageSteps || 4,
+        seed: null,
       }
       const videoSettings = shouldVideoGenerateWithLtxApi
         ? sanitizeForcedApiVideoSettings(rawVideoSettings)
@@ -352,7 +355,7 @@ export function useRegeneration(params: UseRegenerationParams) {
         regenReset()
       })()
     }
-  }, [regenVideoUrl, regenVideoPath, regeneratingAssetId, currentProjectId, isRegenerating])
+  }, [regenVideoUrl, regenVideoPath, regeneratingAssetId, regeneratingClipId, currentProjectId, isRegenerating, assets, addTakeToAsset, setClips, regenReset])
 
   // Handle regeneration image result
   useEffect(() => {
@@ -383,7 +386,7 @@ export function useRegeneration(params: UseRegenerationParams) {
         regenReset()
       })()
     }
-  }, [regenImageUrl, regeneratingAssetId, currentProjectId, isRegenerating])
+  }, [regenImageUrl, regenImagePath, regeneratingAssetId, regeneratingClipId, currentProjectId, isRegenerating, assets, addTakeToAsset, setClips, regenReset])
 
   // Clean up regeneration state when generation fails (let the error dialog handle regenReset)
   useEffect(() => {
@@ -396,7 +399,7 @@ export function useRegeneration(params: UseRegenerationParams) {
     setRegeneratingAssetId(null)
     setRegeneratingClipId(null)
     // Do NOT call regenReset() — let the error dialog handle it
-  }, [regenError, regeneratingAssetId, isRegenerating])
+  }, [regenError, regeneratingAssetId, regeneratingClipId, isRegenerating, setClips])
 
   // Handle take navigation on a clip (also updates linked audio/video clips)
   const handleClipTakeChange = useCallback((clipId: string, direction: 'prev' | 'next') => {
