@@ -327,6 +327,12 @@ class LTXFastVideoPipeline:
                 tiling_config=tiling_config,
             )
         finally:
+            # Synchronize before restoring module state so any async CUDA ops
+            # queued inside DistilledPipeline.__call__ (e.g. vae_decode_audio)
+            # are fully complete before Python GC frees the pipeline's locals.
+            # Without this, dual-conditioning (2× CUDA tensors freed at __call__
+            # return) can race with in-flight CUDA work → 0xC0000005 on Windows.
+            torch.cuda.synchronize()
             _distilled_mod.DISTILLED_SIGMA_VALUES = _orig_sigmas
             _distilled_mod.simple_denoising_func = _orig_simple
 
@@ -364,6 +370,12 @@ class LTXFastVideoPipeline:
         )
         chunks = video_chunks_number(num_frames, tiling_config)
         encode_video_output(video=video, audio=audio, fps=int(frame_rate), output_path=output_path, video_chunks_number_value=chunks)
+        # Synchronize after VAE decode + audio write so all GPU→CPU transfers
+        # finish before inference_mode context exits.  Explicit delete + cache
+        # clear keeps VRAM tidy for the next generation.
+        del video, audio
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
     @torch.inference_mode()
     def warmup(self, output_path: str) -> None:
