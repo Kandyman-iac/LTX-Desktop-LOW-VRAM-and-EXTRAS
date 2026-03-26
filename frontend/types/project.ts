@@ -43,6 +43,8 @@ export interface Asset {
   thumbnail?: string
   favorite?: boolean
   bin?: string // Bin/folder name for organization (undefined = no bin)
+  rating?: number // Star rating 1–5 (undefined = unrated)
+  notes?: string // Free-text notes/comments attached to this asset
   // Regeneration support
   generationParams?: GenerationParams
   takes?: AssetTake[] // All takes (index 0 = original). If undefined, the asset itself is the only take.

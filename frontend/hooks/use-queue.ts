@@ -15,6 +15,21 @@ export interface QueuedJob {
   fps: string
   model: string
   aspect_ratio: string
+  /** JSON string snapshotted at queue time — parse with parseJobLoras() */
+  civitai_loras_snapshot: string | null
+}
+
+/** Parse a civitai_loras JSON string into {name, strength} pairs for active LoRAs only. */
+export function parseJobLoras(json: string | null | undefined): Array<{ name: string; strength: number }> {
+  if (!json) return []
+  try {
+    const raw = JSON.parse(json) as Array<{ path: string; enabled: boolean; strength: number }>
+    return raw
+      .filter(l => l.enabled)
+      .map(l => ({ name: l.path.replace(/\\/g, '/').split('/').pop() ?? l.path, strength: l.strength }))
+  } catch {
+    return []
+  }
 }
 
 interface UseQueueResult {

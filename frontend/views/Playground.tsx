@@ -26,7 +26,7 @@ import { useEncodePrompt } from '../hooks/use-encode-prompt'
 import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
 import { useEnhancedPromptHistory } from '../hooks/use-enhanced-prompt-history'
 import { OutputBrowser } from '../components/OutputBrowser'
-import { useQueue } from '../hooks/use-queue'
+import { useQueue, parseJobLoras } from '../hooks/use-queue'
 import { QueuePanel } from '../components/QueuePanel'
 
 const DEFAULT_SETTINGS: GenerationSettings = {
@@ -63,6 +63,38 @@ export function Playground() {
 
   const { status, processStatus } = useBackend()
   const { jobs: queueJobs, addToQueue, removeFromQueue } = useQueue()
+  const pushedQueueJobIds = useRef<Set<string>>(new Set())
+
+  // Push completed queue jobs into generation history
+  useEffect(() => {
+    const newlyCompleted = queueJobs.filter(
+      j => j.status === 'complete' && j.result_path && !pushedQueueJobIds.current.has(j.id)
+    )
+    for (const job of newlyCompleted) {
+      pushedQueueJobIds.current.add(job.id)
+      pushHistory({
+        prompt: job.prompt,
+        negativePrompt: '',
+        settings: {
+          model: (job.model as 'fast' | 'pro') || 'fast',
+          duration: parseInt(job.duration) || 5,
+          videoResolution: job.resolution || '720p',
+          fps: parseInt(job.fps) || 24,
+          audio: false,
+          cameraMotion: 'none',
+          aspectRatio: job.aspect_ratio || '16:9',
+          seed: null,
+          imageResolution: '1080p',
+          imageAspectRatio: '16:9',
+          imageSteps: 4,
+        },
+        seedUsed: null,
+        videoPath: job.result_path,
+        lorasUsed: parseJobLoras(job.civitai_loras_snapshot),
+      })
+    }
+  }, [queueJobs, pushHistory])
+
   const { isEncoding, encodedPrompt, encodeError, encodePrompt, clearEncoded } = useEncodePrompt()
   const { isEnhancing, enhanceError, enhancePrompt } = useEnhancePrompt()
   const { history: enhanceHistory, addToHistory: addToEnhanceHistory, clearHistory: clearEnhanceHistory } = useEnhancedPromptHistory()
@@ -126,6 +158,7 @@ export function Playground() {
         settings: info.settings,
         seedUsed: info.seedUsed,
         videoPath: info.videoPath,
+        lorasUsed: parseJobLoras(appSettings.civitaiLoras),
       })
       // Show the actual seed used so user can lock it to repeat the generation
       if (info.seedUsed != null && info.settings.seed == null) {
@@ -472,6 +505,11 @@ export function Playground() {
                               {entry.seedUsed != null ? ` · seed ${entry.seedUsed}` : ''}
                               {' · '}{new Date(entry.timestamp).toLocaleString()}
                             </p>
+                            {entry.lorasUsed && entry.lorasUsed.length > 0 && (
+                              <p className="text-[11px] text-violet-400/80 mt-0.5 truncate">
+                                {entry.lorasUsed.map(l => `${l.name} ×${l.strength.toFixed(2)}`).join(' · ')}
+                              </p>
+                            )}
                           </div>
                           <button
                             onClick={(e) => { e.stopPropagation(); removeHistory(entry.id); setShowHistory(false); setTimeout(() => setShowHistory(true), 0) }}

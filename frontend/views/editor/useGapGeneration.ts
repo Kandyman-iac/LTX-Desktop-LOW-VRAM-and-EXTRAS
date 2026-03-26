@@ -87,6 +87,7 @@ export function useGapGeneration({
     mode: 'text-to-video' | 'image-to-video' | 'text-to-image'
     prompt: string; settings: GenerationSettings
     imageFile: File | null; applyAudio: boolean
+    startConditioned: boolean
   } | null>(null)
 
   // Gap context-aware prompt suggestion
@@ -103,7 +104,7 @@ export function useGapGeneration({
   const [gapAfterFramePath, setGapAfterFramePath] = useState<string | null>(null)
   // Frame conditioning toggle state (lifted from modal so handleGapGenerate can read them)
   const [gapStartFrameEnabled, setGapStartFrameEnabled] = useState(true)
-  const [gapEndFrameEnabled, setGapEndFrameEnabled] = useState(false)
+  const [gapEndFrameEnabled, setGapEndFrameEnabled] = useState(true)
   const [gapStartFrameOverridePath, setGapStartFrameOverridePath] = useState<string | null>(null)
   const [gapEndFrameOverridePath, setGapEndFrameOverridePath] = useState<string | null>(null)
 
@@ -172,6 +173,22 @@ export function useGapGeneration({
       duration: Math.min(Math.max(1, Math.round(gapDuration)), gapSettings.model === 'pro' ? 10 : 20),
     }
 
+    // Build first/last frame conditioning frames (T2V only, not API)
+    const conditioningFrames: ConditioningFrame[] = []
+    let startConditioned = false
+    if (mode === 'text-to-video') {
+      const startPath = gapStartFrameOverridePath ?? gapBeforeFramePath
+      const endPath = gapEndFrameOverridePath ?? gapAfterFramePath
+      if (gapStartFrameEnabled && startPath) {
+        conditioningFrames.push({ role: 'first', imagePath: startPath, imageUrl: null, strength: 1.0, position: 0 })
+        startConditioned = true
+      }
+      if (gapEndFrameEnabled && endPath) {
+        // Use 0.85 strength for end frame — full strength (1.0) causes hard discontinuity artifacts
+        conditioningFrames.push({ role: 'last', imagePath: endPath, imageUrl: null, strength: 0.85, position: 1 })
+      }
+    }
+
     // Save generating gap state so we can show indicator and place result later
     setGeneratingGap({
       trackIndex: gap.trackIndex,
@@ -182,24 +199,12 @@ export function useGapGeneration({
       settings,
       imageFile: gapImageFile,
       applyAudio: gapApplyAudioToTrack,
+      startConditioned,
     })
 
     // Close the modal immediately so user can keep editing
     setSelectedGap(null)
     setGapGenerateMode(null)
-    
-    // Build first/last frame conditioning frames (T2V only, not API)
-    const conditioningFrames: ConditioningFrame[] = []
-    if (mode === 'text-to-video') {
-      const startPath = gapStartFrameOverridePath ?? gapBeforeFramePath
-      const endPath = gapEndFrameOverridePath ?? gapAfterFramePath
-      if (gapStartFrameEnabled && startPath) {
-        conditioningFrames.push({ role: 'first', imagePath: startPath, imageUrl: null, strength: 1.0, position: 0 })
-      }
-      if (gapEndFrameEnabled && endPath) {
-        conditioningFrames.push({ role: 'last', imagePath: endPath, imageUrl: null, strength: 1.0, position: 1 })
-      }
-    }
 
     try {
       if (mode === 'text-to-image') {
@@ -312,13 +317,18 @@ export function useGapGeneration({
         }
       }
 
+      // When start-frame conditioning was active the model replaces frame 0 with the
+      // conditioning image, creating a duplicate of clip A's last frame. Trim that
+      // first frame so the boundary doesn't stutter/jump.
+      const startTrim = gap.startConditioned ? 1 / gap.settings.fps : 0
+
       const newClip: TimelineClip = {
         id: videoClipId,
         assetId: asset.id,
         type: type === 'image' ? 'image' : 'video',
         startTime: gap.startTime,
         duration: gapDuration,
-        trimStart: 0,
+        trimStart: startTrim,
         trimEnd: 0,
         speed: 1,
         reversed: false,
@@ -344,7 +354,7 @@ export function useGapGeneration({
           type: 'audio',
           startTime: gap.startTime,
           duration: gapDuration,
-          trimStart: 0,
+          trimStart: startTrim,
           trimEnd: 0,
           speed: 1,
           reversed: false,

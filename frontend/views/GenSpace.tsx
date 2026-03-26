@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   Trash2, Download, Image, Video, X,
   Heart, Film, Volume2, VolumeX, Sparkles,
   Clock, Monitor, ChevronUp, Scissors, Music,
   ChevronLeft, ChevronRight, Copy, Check, Lock, Shuffle,
   Wand2, Cpu, CheckCircle, AlertCircle, ListPlus, ChevronDown,
-  Upload, Plus, Maximize2, Minimize2,
+  Upload, Plus, Maximize2, Minimize2, Star, MessageSquare, FolderPlus,
 } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import type { GenSpaceRetakeSource } from '../contexts/ProjectContext'
@@ -32,9 +32,11 @@ import { FreeApiKeyBubble } from '../components/FreeApiKeyBubble'
 import { useBackend } from '../hooks/use-backend'
 import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
 import { useEnhancedPromptHistory } from '../hooks/use-enhanced-prompt-history'
+import { useGenerationHistory } from '../hooks/use-generation-history'
 import { useEncodePrompt } from '../hooks/use-encode-prompt'
-import { useQueue } from '../hooks/use-queue'
+import { useQueue, parseJobLoras } from '../hooks/use-queue'
 import { QueuePanel } from '../components/QueuePanel'
+import { COLOR_LABELS, getColorLabel } from './editor/video-editor-utils'
 
 // Asset card with hover overlays
 function AssetCard({
@@ -45,7 +47,12 @@ function AssetCard({
   onCreateVideo,
   onRetake,
   onIcLora,
-  onToggleFavorite
+  onToggleFavorite,
+  onSetRating,
+  onSetNotes,
+  onSetColorLabel,
+  onSetBin,
+  allBins,
 }: {
   asset: Asset
   onDelete: () => void
@@ -55,12 +62,22 @@ function AssetCard({
   onRetake?: (asset: Asset) => void
   onIcLora?: (asset: Asset) => void
   onToggleFavorite?: () => void
+  onSetRating?: (rating: number | undefined) => void
+  onSetNotes?: (notes: string) => void
+  onSetColorLabel?: (color: string | undefined) => void
+  onSetBin?: (bin: string | undefined) => void
+  allBins?: string[]
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isHovered, setIsHovered] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [isMuted, setIsMuted] = useState(true)
+  const [showNotesInput, setShowNotesInput] = useState(false)
+  const [notesValue, setNotesValue] = useState(asset.notes ?? '')
+  const [showBinInput, setShowBinInput] = useState(false)
+  const [newBinValue, setNewBinValue] = useState('')
   const isFavorite = asset.favorite || false
+  const colorDef = getColorLabel(asset.colorLabel)
 
   useEffect(() => {
     if (asset.type === 'video' && videoRef.current) {
@@ -98,15 +115,15 @@ function AssetCard({
     <div
       className="relative group cursor-pointer rounded-xl overflow-hidden bg-zinc-900"
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseLeave={() => { setIsHovered(false); setShowNotesInput(false); setShowBinInput(false) }}
       onClick={onPlay}
       draggable={asset.type === 'image'}
       onDragStart={(e) => asset.type === 'image' && onDragStart(e, asset)}
     >
       {asset.type === 'video' ? (
-        <video 
+        <video
           ref={videoRef}
-          src={asset.url} 
+          src={asset.url}
           className="w-full aspect-video object-contain"
           muted={isMuted}
           loop
@@ -115,7 +132,28 @@ function AssetCard({
       ) : (
         <img src={asset.url} alt="" className="w-full aspect-video object-contain" />
       )}
-      
+
+      {/* Color label bar — always visible when set */}
+      {colorDef && (
+        <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: colorDef.color }} />
+      )}
+
+      {/* Star rating — always visible when rated */}
+      {(asset.rating ?? 0) > 0 && !isHovered && (
+        <div className="absolute bottom-2 left-2 flex items-center gap-0.5">
+          {[1,2,3,4,5].map(n => (
+            <Star key={n} className={`h-3 w-3 ${n <= (asset.rating ?? 0) ? 'text-yellow-400 fill-current' : 'text-zinc-600'}`} />
+          ))}
+        </div>
+      )}
+
+      {/* Notes indicator — always visible when set */}
+      {asset.notes && !isHovered && (
+        <div className="absolute bottom-2 right-2 p-1 rounded bg-black/40 backdrop-blur-md">
+          <MessageSquare className="h-3 w-3 text-zinc-300" />
+        </div>
+      )}
+
       {/* Favorite heart - always visible when favorited */}
       {isFavorite && !isHovered && (
         <button
@@ -125,7 +163,7 @@ function AssetCard({
           <Heart className="h-3.5 w-3.5 fill-current" />
         </button>
       )}
-      
+
       {/* Hover overlay */}
       <div className={`absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 transition-opacity duration-200 ${
         isHovered ? 'opacity-100' : 'opacity-0'
@@ -141,7 +179,7 @@ function AssetCard({
             >
               <Heart className={`h-3.5 w-3.5 ${isFavorite ? 'fill-current' : ''}`} />
             </button>
-            
+
             {asset.type === 'image' && (
               <>
                 <button
@@ -174,7 +212,7 @@ function AssetCard({
               </>
             )}
           </div>
-          
+
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleDownload}
@@ -182,10 +220,134 @@ function AssetCard({
             >
               <Download className="h-3.5 w-3.5" />
             </button>
-            {/* Tools button hidden for now */}
           </div>
         </div>
-        
+
+        {/* Middle meta bar: color picker + star rating + notes + bin */}
+        <div className="absolute left-2 right-2 top-12 flex items-center gap-1.5 flex-wrap" onClick={e => e.stopPropagation()}>
+          {/* Color dots */}
+          <div className="flex items-center gap-0.5 p-1 rounded-lg bg-black/50 backdrop-blur-md">
+            <button
+              onClick={() => onSetColorLabel?.(undefined)}
+              className={`w-3.5 h-3.5 rounded-full border transition-all ${!asset.colorLabel ? 'border-white scale-110' : 'border-zinc-600 hover:border-white'} bg-zinc-700`}
+              title="No color"
+            />
+            {COLOR_LABELS.map(cl => (
+              <button
+                key={cl.id}
+                onClick={() => onSetColorLabel?.(asset.colorLabel === cl.id ? undefined : cl.id)}
+                className={`w-3.5 h-3.5 rounded-full border transition-all ${asset.colorLabel === cl.id ? 'border-white scale-110' : 'border-transparent hover:border-white'}`}
+                style={{ backgroundColor: cl.color }}
+                title={cl.label}
+              />
+            ))}
+          </div>
+
+          {/* Star rating */}
+          <div className="flex items-center gap-0.5 p-1 rounded-lg bg-black/50 backdrop-blur-md">
+            {[1,2,3,4,5].map(n => (
+              <button
+                key={n}
+                onClick={() => onSetRating?.(asset.rating === n ? undefined : n)}
+                className="p-0.5"
+              >
+                <Star className={`h-3.5 w-3.5 transition-colors ${n <= (asset.rating ?? 0) ? 'text-yellow-400 fill-current' : 'text-zinc-500 hover:text-yellow-400'}`} />
+              </button>
+            ))}
+          </div>
+
+          {/* Notes toggle */}
+          <button
+            onClick={() => { setShowNotesInput(!showNotesInput); setNotesValue(asset.notes ?? '') }}
+            className={`p-1.5 rounded-lg backdrop-blur-md transition-colors ${asset.notes ? 'bg-blue-500/30 text-blue-300' : 'bg-black/50 text-zinc-400 hover:text-white'}`}
+            title="Notes"
+          >
+            <MessageSquare className="h-3 w-3" />
+          </button>
+
+          {/* Bin toggle */}
+          <button
+            onClick={() => { setShowBinInput(!showBinInput) }}
+            className={`p-1.5 rounded-lg backdrop-blur-md transition-colors ${asset.bin ? 'bg-violet-500/30 text-violet-300' : 'bg-black/50 text-zinc-400 hover:text-white'}`}
+            title={asset.bin ? `Bin: ${asset.bin}` : 'Add to bin'}
+          >
+            <FolderPlus className="h-3 w-3" />
+          </button>
+          {asset.bin && (
+            <span className="text-[10px] text-violet-300 bg-violet-500/20 px-1.5 py-0.5 rounded">{asset.bin}</span>
+          )}
+        </div>
+
+        {/* Notes input (expands below meta bar) */}
+        {showNotesInput && (
+          <div className="absolute left-2 right-2 top-[88px] z-20" onClick={e => e.stopPropagation()}>
+            <div className="bg-zinc-900/95 border border-zinc-700 rounded-lg p-2">
+              <textarea
+                className="w-full bg-transparent text-xs text-white placeholder:text-zinc-500 resize-none outline-none"
+                rows={3}
+                placeholder="Add notes..."
+                value={notesValue}
+                onChange={e => setNotesValue(e.target.value)}
+                autoFocus
+              />
+              <div className="flex justify-end gap-1.5 mt-1">
+                <button
+                  className="px-2 py-0.5 rounded text-xs text-zinc-400 hover:text-white"
+                  onClick={() => setShowNotesInput(false)}
+                >Cancel</button>
+                <button
+                  className="px-2 py-0.5 rounded text-xs bg-violet-600 text-white hover:bg-violet-500"
+                  onClick={() => { onSetNotes?.(notesValue); setShowNotesInput(false) }}
+                >Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bin picker */}
+        {showBinInput && (
+          <div className="absolute left-2 right-2 top-[88px] z-20" onClick={e => e.stopPropagation()}>
+            <div className="bg-zinc-900/95 border border-zinc-700 rounded-lg p-2 space-y-1">
+              {(allBins ?? []).map(bin => (
+                <button
+                  key={bin}
+                  onClick={() => { onSetBin?.(asset.bin === bin ? undefined : bin); setShowBinInput(false) }}
+                  className={`w-full text-left text-xs px-2 py-1 rounded transition-colors ${asset.bin === bin ? 'bg-violet-600 text-white' : 'text-zinc-300 hover:bg-zinc-700'}`}
+                >
+                  {bin}
+                </button>
+              ))}
+              <div className="flex gap-1">
+                <input
+                  className="flex-1 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-white placeholder:text-zinc-500 outline-none"
+                  placeholder="New bin..."
+                  value={newBinValue}
+                  onChange={e => setNewBinValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && newBinValue.trim()) {
+                      onSetBin?.(newBinValue.trim())
+                      setNewBinValue('')
+                      setShowBinInput(false)
+                    }
+                  }}
+                  autoFocus={!(allBins ?? []).length}
+                />
+                <button
+                  className="px-2 py-1 rounded text-xs bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-40"
+                  disabled={!newBinValue.trim()}
+                  onClick={() => { onSetBin?.(newBinValue.trim()); setNewBinValue(''); setShowBinInput(false) }}
+                >Add</button>
+              </div>
+              {asset.bin && (
+                <button
+                  className="w-full text-left text-xs px-2 py-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-700 transition-colors"
+                  onClick={() => { onSetBin?.(undefined); setShowBinInput(false) }}
+                >Remove from bin</button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Bottom controls for video */}
         {asset.type === 'video' && (
           <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
@@ -204,16 +366,14 @@ function AssetCard({
         )}
 
         {/* Delete button (subtle, bottom right) */}
-        {(
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete() }}
-            className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white/70 hover:bg-red-500/80 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white/70 hover:bg-red-500/80 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
-      
+
     </div>
   )
 }
@@ -1391,6 +1551,7 @@ export function GenSpace() {
     addTakeToAsset,
     deleteAsset,
     toggleFavorite,
+    updateAsset,
     genSpaceEditImageUrl,
     setGenSpaceEditImageUrl,
     setGenSpaceEditMode,
@@ -1409,6 +1570,7 @@ export function GenSpace() {
   const { isEncoding, encodedPrompt, encodePrompt } = useEncodePrompt()
   const { isEnhancing, enhanceError, enhancePrompt } = useEnhancePrompt()
   const { addToHistory: addToEnhanceHistory } = useEnhancedPromptHistory()
+  const { push: pushHistory } = useGenerationHistory()
   const showEncodeButton = appSettings.useLocalTextEncoder
   const [negativePrompt, setNegativePrompt] = useState('')
   const [editableEnhancedPrompt, setEditableEnhancedPrompt] = useState<string | null>(null)
@@ -1427,6 +1589,9 @@ export function GenSpace() {
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [showFavorites, setShowFavorites] = useState(false)
+  const [filterBin, setFilterBin] = useState<string | null>(null)
+  const [filterColor, setFilterColor] = useState<string | null>(null)
+  const [filterMinRating, setFilterMinRating] = useState(0)
   const [gallerySize, setGallerySize] = useState<GallerySize>('medium')
   const [showSizeMenu, setShowSizeMenu] = useState(false)
   const sizeMenuRef = useRef<HTMLDivElement>(null)
@@ -1696,6 +1861,26 @@ export function GenSpace() {
     for (const job of newlyCompleted) {
       persistedQueueJobIds.current.add(job.id)
       const resultPath = job.result_path!
+      pushHistory({
+        prompt: job.prompt,
+        negativePrompt: '',
+        settings: {
+          model: (job.model as 'fast' | 'pro') || 'fast',
+          duration: parseInt(job.duration) || 5,
+          videoResolution: job.resolution || '720p',
+          fps: parseInt(job.fps) || 24,
+          audio: false,
+          cameraMotion: 'none',
+          aspectRatio: job.aspect_ratio || '16:9',
+          seed: null,
+          imageResolution: '1080p',
+          imageAspectRatio: '16:9',
+          imageSteps: 4,
+        },
+        seedUsed: null,
+        videoPath: resultPath,
+        lorasUsed: parseJobLoras(job.civitai_loras_snapshot),
+      })
       ;(async () => {
         try {
           const copied = await copyToAssetFolder(resultPath, currentProjectId)
@@ -1732,7 +1917,7 @@ export function GenSpace() {
         }
       })()
     }
-  }, [queueJobs, currentProjectId, addAsset])
+  }, [queueJobs, currentProjectId, addAsset, pushHistory])
 
   // When retake completes, add as take or new asset
   useEffect(() => {
@@ -2094,7 +2279,14 @@ export function GenSpace() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showSizeMenu])
 
-  const filteredAssets = showFavorites ? assets.filter(a => a.favorite) : assets
+  const bins = useMemo(() => [...new Set(assets.filter(a => a.bin).map(a => a.bin!))], [assets])
+  const filteredAssets = useMemo(() => assets.filter(a => {
+    if (showFavorites && !a.favorite) return false
+    if (filterBin && a.bin !== filterBin) return false
+    if (filterColor && a.colorLabel !== filterColor) return false
+    if (filterMinRating > 0 && (a.rating ?? 0) < filterMinRating) return false
+    return true
+  }), [assets, showFavorites, filterBin, filterColor, filterMinRating])
   const favoriteCount = assets.filter(a => a.favorite).length
   const isLibraryMode = mode === 'video' || mode === 'image'
 
@@ -2140,13 +2332,13 @@ export function GenSpace() {
         </div>
       )}
 
-      {/* No favorites empty state */}
-      {isLibraryMode && showFavorites && filteredAssets.length === 0 && assets.length > 0 && (
+      {/* No results empty state (filters active) */}
+      {isLibraryMode && filteredAssets.length === 0 && assets.length > 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
           <Heart className="h-12 w-12 text-zinc-700 mb-4" />
-          <h3 className="text-lg font-semibold text-white mb-2">No favorites yet</h3>
+          <h3 className="text-lg font-semibold text-white mb-2">No matches</h3>
           <p className="text-zinc-500 text-sm">
-            Click the heart icon on any asset to add it to your favorites.
+            Try adjusting your filters.
           </p>
         </div>
       )}
@@ -2155,7 +2347,64 @@ export function GenSpace() {
       {isLibraryMode && (assets.length > 0 || isGenerating) && (
         <div className="absolute inset-x-0 top-0 bottom-[160px] flex flex-col px-4 pt-4">
           {/* Top bar */}
-          <div className="flex items-center justify-end pb-2 gap-2">
+          <div className="flex items-center justify-end pb-2 gap-2 flex-wrap">
+            {/* Bin pills */}
+            {bins.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  onClick={() => setFilterBin(null)}
+                  className={`px-2 py-1 rounded-md text-xs transition-colors ${!filterBin ? 'bg-violet-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+                >
+                  All
+                </button>
+                {bins.map(bin => (
+                  <button
+                    key={bin}
+                    onClick={() => setFilterBin(filterBin === bin ? null : bin)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${filterBin === bin ? 'bg-violet-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+                  >
+                    <FolderPlus className="h-3 w-3" />
+                    {bin}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Color filter dots */}
+            <div className="flex items-center gap-0.5 p-1 rounded-md bg-zinc-900">
+              <button
+                onClick={() => setFilterColor(null)}
+                className={`w-4 h-4 rounded-full border transition-all ${!filterColor ? 'border-white scale-110' : 'border-zinc-600 hover:border-white'} bg-zinc-700`}
+                title="All colors"
+              />
+              {COLOR_LABELS.map(cl => (
+                <button
+                  key={cl.id}
+                  onClick={() => setFilterColor(filterColor === cl.id ? null : cl.id)}
+                  className={`w-4 h-4 rounded-full border transition-all ${filterColor === cl.id ? 'border-white scale-110' : 'border-transparent hover:border-white'}`}
+                  style={{ backgroundColor: cl.color }}
+                  title={cl.label}
+                />
+              ))}
+            </div>
+
+            {/* Star filter */}
+            <div className="flex items-center gap-0.5 p-1 rounded-md bg-zinc-900">
+              {[0,1,2,3,4,5].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setFilterMinRating(filterMinRating === n ? 0 : n)}
+                  className="p-0.5"
+                  title={n === 0 ? 'All ratings' : `${n}+ stars`}
+                >
+                  {n === 0
+                    ? <span className={`text-xs font-medium ${filterMinRating === 0 ? 'text-white' : 'text-zinc-500 hover:text-white'}`}>All</span>
+                    : <Star className={`h-3.5 w-3.5 transition-colors ${n <= filterMinRating ? 'text-yellow-400 fill-current' : 'text-zinc-500 hover:text-yellow-400'}`} />
+                  }
+                </button>
+              ))}
+            </div>
+
             <button
               onClick={() => setShowFavorites(!showFavorites)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -2256,6 +2505,11 @@ export function GenSpace() {
                   onRetake={handleRetake}
                   onIcLora={!forceApiGenerations ? handleIcLora : undefined}
                   onToggleFavorite={() => currentProjectId && toggleFavorite(currentProjectId, asset.id)}
+                  onSetRating={(rating) => currentProjectId && updateAsset(currentProjectId, asset.id, { rating })}
+                  onSetNotes={(notes) => currentProjectId && updateAsset(currentProjectId, asset.id, { notes })}
+                  onSetColorLabel={(colorLabel) => currentProjectId && updateAsset(currentProjectId, asset.id, { colorLabel })}
+                  onSetBin={(bin) => currentProjectId && updateAsset(currentProjectId, asset.id, { bin })}
+                  allBins={bins}
                 />
               ))}
             </div>

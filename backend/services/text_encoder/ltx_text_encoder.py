@@ -1,5 +1,36 @@
 """Text encoder patching and API embedding service.
 
+# Custom system prompt for local Gemma prompt enhancement.
+# Uses film-direction style and requests rich, long-form output (~5000 chars).
+# Replaces the default ltx_core system prompt which caps at ~2000 chars.
+_FILM_DIRECTION_SYSTEM_PROMPT = (
+    "You are an expert cinematographer and director writing detailed shot descriptions "
+    "for an AI video generation system. Given a user prompt, expand it into a richly "
+    "detailed, cinematically descriptive passage optimised for text-to-video conditioning.\n\n"
+    "#### Style:\n"
+    "- Write in present tense, active cinematic language: 'The camera TRACKS alongside...', "
+    "'A wide establishing shot reveals...'\n"
+    "- Include shot type (ECU/CU/MCU/MS/WS/ELS/OTS/POV), camera movement (static/pan/tilt/"
+    "dolly/push-in/pull-back/crane/handheld/steadicam), depth of field, and lens choice.\n"
+    "- Describe lighting: key light direction, fill, rim, colour temperature, practicals, shadows.\n"
+    "- Detail subjects fully: physical appearance, clothing (fabric/texture/fit), expression, "
+    "micro-movements, body language.\n"
+    "- Describe the environment in layers: foreground, midground, background, materials, scale.\n"
+    "- Include temporal motion: what moves, how it moves, speed, rhythm, transition beats.\n"
+    "- Integrate audio: room tone, Foley (material-specific), atmospheric bed, music texture, "
+    "voice delivery if speech is present.\n\n"
+    "#### Rules:\n"
+    "- Faithfully expand everything the user mentioned — never omit or contradict their intent.\n"
+    "- Invent specific cinematic detail where the user is vague (lighting, texture, environment). "
+    "NEVER invent characters, dialogue, or camera moves that are not implied.\n"
+    "- DO NOT use scene headings (INT./EXT.), act markers, timestamps, bullet points, "
+    "headings, or Markdown. Start directly with the shot description.\n\n"
+    "#### Length:\n"
+    "Write 3–6 paragraphs of dense cinematic description. Aim for maximum visual richness. "
+    "Each paragraph covers one continuous sequence or camera movement. "
+    "Target 800–1500 words of output."
+)
+
 Multi-GPU strategy (when transformer_device != device):
   self.device           — video GPU (cuda:0): transformer, VAE, upsampler
   self.transformer_device — text GPU (cuda:1): Gemma text encoder, resident permanently
@@ -235,7 +266,11 @@ class LTXTextEncoder:
                 enhance_locally = getattr(state.app_settings, "enhance_prompt_locally", False)
                 if enhance_locally and hasattr(text_encoder, "enhance_t2v") and prompt_list:
                     try:
-                        enhanced = cast(Any, text_encoder).enhance_t2v(prompt_list[0])
+                        enhanced = cast(Any, text_encoder).enhance_t2v(
+                            prompt_list[0],
+                            max_new_tokens=1500,
+                            system_prompt=_FILM_DIRECTION_SYSTEM_PROMPT,
+                        )
                         logger.info(
                             "Local prompt enhanced: %r -> %r",
                             prompt_list[0][:60],

@@ -25,6 +25,10 @@ class QueuedJob:
     result_path: str | None = None
     error: str | None = None
     created_at: float = field(default_factory=time.time)
+    # Snapshot of civitai_loras at the moment this job was queued.
+    # Restored before the job runs so LoRA scale changes made after
+    # queuing don't bleed into earlier-queued jobs.
+    civitai_loras_snapshot: str | None = None
 
 
 class QueueHandler:
@@ -38,8 +42,8 @@ class QueueHandler:
     def set_video_generation(self, handler: VideoGenerationHandler) -> None:
         self._video_generation = handler
 
-    def add_job(self, req: GenerateVideoRequest) -> QueuedJob:
-        job = QueuedJob(id=str(uuid.uuid4()), request=req, status="pending")
+    def add_job(self, req: GenerateVideoRequest, civitai_loras: str | None = None) -> QueuedJob:
+        job = QueuedJob(id=str(uuid.uuid4()), request=req, status="pending", civitai_loras_snapshot=civitai_loras)
         with self._lock:
             self._jobs.append(job)
         logger.info("Queue: job %s added (queue length=%d)", job.id[:8], len(self._jobs))
@@ -74,6 +78,26 @@ class QueueHandler:
         try:
             if self._video_generation is None:
                 raise RuntimeError("QueueHandler not wired to VideoGenerationHandler")
+
+            # Restore the LoRA config that was active when this job was queued.
+            # If the user changed LoRA settings after queuing, the pipeline needs
+            # to be rebuilt with the snapshotted values so earlier-queued jobs
+            # use the scale they were submitted with.
+            if job.civitai_loras_snapshot is not None:
+                try:
+                    current_loras = self._video_generation.state.app_settings.civitai_loras
+                    if current_loras != job.civitai_loras_snapshot:
+                        logger.info(
+                            "Queue: restoring LoRA snapshot for job %s (was changed since queuing)",
+                            job.id[:8],
+                        )
+                        self._video_generation.state.app_settings.civitai_loras = job.civitai_loras_snapshot
+                        # Unload the pipeline so the next generate() rebuilds it
+                        # with the snapshotted LoRA settings.
+                        self._video_generation._pipelines.unload_gpu_pipeline()
+                except Exception as exc:
+                    logger.warning("Queue: LoRA snapshot restore failed (%s) — continuing", exc)
+
             result = self._video_generation.generate(job.request)
             with self._lock:
                 job.status = "complete"

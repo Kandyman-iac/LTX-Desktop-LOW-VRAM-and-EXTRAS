@@ -88,3 +88,26 @@ Key patterns:
 - Electron builder config: `electron-builder.yml`
 - Video editor (largest frontend file): `frontend/views/VideoEditor.tsx`
 - Project types: `frontend/types/project.ts`
+- Feature guide (all fork features): `docs/FEATURES.md`
+- Roadmap / todo list: `docs/ROADMAP.md`
+
+## Fork-Specific Gotchas
+
+This is a fork of LTX Desktop with VRAM optimisation and extra generation controls. Several non-obvious conventions apply:
+
+### Settings file split — camelCase vs snake_case
+- `settings.json` in the **repo root** uses **camelCase** keys. This file is NOT read by the running backend — it is only a reference/default schema.
+- The backend reads settings from `LTX_APP_DATA_DIR/settings.json` (the OS app-data folder, not the repo). This file uses **snake_case** keys written by `save_settings` with `by_alias=False`.
+- If a setting change appears to have no effect, check which file you are editing.
+
+### Settings flow
+`AppSettings` model → `SettingsHandler.load_settings()` → `state.app_settings` → consumed by pipeline factory at generation time.
+
+### Multi-GPU pipeline
+`pipelines_handler.py:_create_video_pipeline` contains the multi-GPU split logic (transformer on `cuda:0`, text encoder on `cuda:1`). All other VRAM features (block swap, FP8, attention tiling, GGUF, LoRA) are installed as post-build patches in `ltx_fast_video_pipeline.py`.
+
+### CUDA async / Windows crash risk
+On Windows, `torch.cuda.synchronize()` must be called after `DistilledPipeline.__call__` returns and after VAE decode completes. Without it, Python GC can free CUDA tensors while GPU ops are still in-flight → `0xC0000005 STATUS_ACCESS_VIOLATION`. See `_run_inference` and `generate` in `ltx_fast_video_pipeline.py` for the pattern.
+
+### Latent-space frame indexing
+`VideoConditionByLatentIndex.latent_idx` operates in **latent space**, not raw video frames. LTX-Video uses 8:1 temporal compression (121 raw frames → 16 latent frames). Always convert raw frame indices before passing to the backend. See `_raw_frame_to_latent_idx` in `video_generation_handler.py`.

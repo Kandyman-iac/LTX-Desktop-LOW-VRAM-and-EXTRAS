@@ -6,7 +6,7 @@ import gc
 
 import torch
 
-from services.services_utils import empty_device_cache
+from services.services_utils import empty_device_cache, sync_device
 
 
 class TorchCleaner:
@@ -16,5 +16,10 @@ class TorchCleaner:
         self._device = device
 
     def cleanup(self) -> None:
-        empty_device_cache(self._device)
+        # Correct order: collect Python cyclic refs first so their tensors enter
+        # the allocator's free list, then drain the GPU queue, then return those
+        # free blocks to the driver.  Reversing the order (empty_cache then gc)
+        # misses tensors only freed by the GC sweep.
         gc.collect()
+        sync_device(self._device)
+        empty_device_cache(self._device)

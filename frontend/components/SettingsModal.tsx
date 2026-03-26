@@ -20,6 +20,55 @@ interface SettingsModalProps {
 
 type TabId = 'general' | 'apiKeys' | 'inference' | 'promptEnhancer' | 'about'
 
+function FlushVramButton() {
+  const [status, setStatus] = useState<'idle' | 'flushing' | 'done' | 'error'>('idle')
+  const [freedMb, setFreedMb] = useState<number | null>(null)
+
+  const handleFlush = async () => {
+    setStatus('flushing')
+    setFreedMb(null)
+    try {
+      const res = await backendFetch('/api/system/clear-vram', { method: 'POST' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json() as { freed_mb: number }
+      setFreedMb(data.freed_mb)
+      setStatus('done')
+    } catch (err) {
+      logger.error('VRAM flush failed', err)
+      setStatus('error')
+    } finally {
+      setTimeout(() => setStatus('idle'), 3000)
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between">
+      <div>
+        <label className="text-xs text-zinc-300">Flush VRAM Cache</label>
+        <p className="text-xs text-zinc-500">
+          {status === 'done' && freedMb !== null
+            ? `Freed ${freedMb} MB from allocator cache`
+            : status === 'error'
+            ? 'Flush failed — check logs'
+            : 'Return cached GPU memory to driver (gc + empty_cache)'}
+        </p>
+      </div>
+      <button
+        onClick={() => { void handleFlush() }}
+        disabled={status === 'flushing'}
+        className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+          status === 'flushing' ? 'bg-zinc-600 text-zinc-400 cursor-not-allowed' :
+          status === 'done'     ? 'bg-green-600 text-white' :
+          status === 'error'    ? 'bg-red-600 text-white' :
+                                  'bg-amber-600 hover:bg-amber-500 text-white'
+        }`}
+      >
+        {status === 'flushing' ? 'Flushing…' : status === 'done' ? 'Done' : status === 'error' ? 'Error' : 'Flush'}
+      </button>
+    </div>
+  )
+}
+
 export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
   const { settings, updateSettings, saveLtxApiKey, saveFalApiKey, saveGeminiApiKey, forceApiGenerations } = useAppSettings()
   const onSettingsChange = (next: AppSettings) => updateSettings(next)
@@ -1378,6 +1427,9 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       className="w-20 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-xs text-white text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
                     />
                   </div>
+
+                  {/* Manual VRAM flush */}
+                  <FlushVramButton />
                 </div>
 
                 {/* Device overrides */}

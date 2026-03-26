@@ -19,13 +19,13 @@ A custom fork of [Lightricks/LTX-Desktop](https://github.com/Lightricks/LTX-Desk
 
 ## What's different in this fork
 
-This fork extends the upstream LTX-Desktop with low-VRAM support and additional capabilities, targeting consumer GPUs from 8GB VRAM upwards. The reference hardware is a dual NVIDIA RTX 3090 (24GB each, 48GB total).
+This fork extends the upstream LTX-Desktop with low-VRAM support and additional capabilities, targeting consumer GPUs from 16GB VRAM upwards. The reference hardware is a dual NVIDIA RTX 3090 (24GB each, 48GB total).
 
 ### VRAM & inference optimisations
 
 | Feature | Description |
 | --- | --- |
-| **Block swapping** | Keeps only N transformer blocks resident on GPU at a time, swapping the rest to CPU RAM. Configurable via `blockSwapBlocksOnGpu` (0–48). Lowers the VRAM floor from ~31GB to ~8GB. |
+| **Block swapping** | Keeps only N transformer blocks resident on GPU at a time, swapping the rest to CPU RAM. Configurable via `blockSwapBlocksOnGpu` (0–48). Lowers the VRAM floor from ~31GB to ~16GB. |
 | **Attention tiling** | Tiles the query sequence dimension during self-attention to reduce peak VRAM. Configurable via `attentionTileSize`. |
 | **VAE tiling** | Tiles the VAE decode step to reduce peak VRAM during video decoding. |
 | **FP8 transformer** | Enable FP8 precision for the transformer to reduce VRAM with a minor quality trade-off. |
@@ -43,7 +43,7 @@ This fork extends the upstream LTX-Desktop with low-VRAM support and additional 
 | **Negative prompt** | Describe what to exclude from the generation. Sent as a separate text embedding alongside the positive prompt. |
 | **Seed locking** | Lock the seed from the last generation to reproduce identical or near-identical results. The used seed is displayed after each generation. |
 | **Pipeline reload interval** | Automatically reload the generation pipeline every N generations to reclaim VRAM from accumulated state. |
-| **Extended generation lengths** | 15, 20, and 25 second video generation (361+ frames at 24fps) on supported hardware. |
+| **Extended generation lengths** | 15, 20, 25, and 30 second video generation (721+ frames at 24fps) on supported hardware. |
 
 ### Prompt tooling
 
@@ -90,10 +90,10 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for planned features and contribution o
 
 | Platform / hardware | Generation mode | Notes |
 | --- | --- | --- |
-| Windows + CUDA GPU with **≥8GB VRAM** | Local generation (with block swapping) | Downloads model weights locally |
+| Windows + CUDA GPU with **≥16GB VRAM** | Local generation (with block swapping) | Downloads model weights locally |
 | Windows + CUDA GPU with **≥24GB VRAM** | Local generation (full speed) | Downloads model weights locally |
 | Windows (no CUDA or unknown VRAM) | API-only | **LTX API key required** |
-| Linux + CUDA GPU with **≥8GB VRAM** | Local generation (with block swapping) | Downloads model weights locally |
+| Linux + CUDA GPU with **≥16GB VRAM** | Local generation (with block swapping) | Downloads model weights locally |
 | Linux + CUDA GPU with **≥24GB VRAM** | Local generation (full speed) | Downloads model weights locally |
 | Linux (no CUDA or unknown VRAM) | API-only | **LTX API key required** |
 | macOS (Apple Silicon builds) | API-only | **LTX API key required** |
@@ -107,14 +107,14 @@ In API-only mode, available resolutions/durations may be limited to what the API
 ### Windows (local generation)
 
 - Windows 10/11 (x64)
-- NVIDIA GPU with CUDA support and **≥8GB VRAM** (block swapping enabled; 24GB+ recommended for full performance)
+- NVIDIA GPU with CUDA support and **≥16GB VRAM** (block swapping enabled; 24GB+ recommended for full performance)
 - 16GB+ RAM (32GB+ recommended when using block swapping — CPU RAM absorbs offloaded blocks)
 - **160GB+ free disk space** (for model weights, Python environment, and outputs)
 
 ### Linux (local generation)
 
 - Ubuntu 22.04+ or similar distro (x64 or arm64)
-- NVIDIA GPU with CUDA support and **≥8GB VRAM** (block swapping enabled; 24GB+ recommended for full performance)
+- NVIDIA GPU with CUDA support and **≥16GB VRAM** (block swapping enabled; 24GB+ recommended for full performance)
 - NVIDIA driver installed (PyTorch bundles the CUDA runtime)
 - 16GB+ RAM (32GB+ recommended when using block swapping)
 - Plenty of free disk space for model weights and outputs
@@ -150,7 +150,7 @@ Block swapping and attention tiling are the two main VRAM-saving knobs. Both are
 - `blockSwapBlocksOnGpu`: 0–20
 - `attentionTileSize`: 512
 
-**Minimum config — 8GB GPU:**
+**Minimum config — 16GB GPU:**
 - `blockSwapBlocksOnGpu`: 4–8
 - `attentionTileSize`: 64–128
 - `useVaeTiling`: true

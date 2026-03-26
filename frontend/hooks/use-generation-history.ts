@@ -9,6 +9,8 @@ export interface HistoryEntry {
   settings: GenerationSettings
   seedUsed: number | null
   videoPath: string | null
+  /** Active LoRAs at the time of generation (filename + strength). */
+  lorasUsed?: Array<{ name: string; strength: number }> | null
 }
 
 const HISTORY_KEY = 'ltx_generation_history'

@@ -161,20 +161,37 @@ class BlockSwapService:
             # Ensure every block in the current window is on GPU.
             # (On the first block this loads the full initial window;
             #  on subsequent blocks it incrementally loads the new tail.)
+            #
+            # IMPORTANT: use any() over all parameters, not just next() on the
+            # first one.  FP8 (float8_e4m3fn) parameters can end up in a mixed
+            # CPU/GPU state after the two-stage distilled pipeline transitions
+            # from Stage 1 (half-res) to Stage 2 (full-res): a non-FP8 norm
+            # weight may already be on GPU while the FP8 attention weights are
+            # still on CPU.  Checking only the first parameter misses this and
+            # skips the .to(device) call, causing a device-mismatch inside
+            # fp8_cast.new_linear_forward when x is on CUDA but w_up is CPU.
             for load_idx in range(window_start, window_end):
                 blk = all_blocks[load_idx]
-                if next(blk.parameters(), None) is not None:
-                    if next(blk.parameters()).device.type == "cpu":
-                        blk.to(device)
+                params = list(blk.parameters())
+                if not params:
+                    continue
+                if any(p.device.type == "cpu" for p in params):
+                    blk.to(device)
+                    # Belt-and-suspenders: explicitly move any parameter that
+                    # Module.to() may have silently skipped (observed with FP8
+                    # dtypes on some Windows/CUDA builds).
+                    for p in params:
+                        if p.device.type == "cpu":
+                            p.data = p.data.to(device)
 
             # Evict the block that just left the window (idx - 1).
             # It has already finished its forward pass.
             evict_idx = idx - 1
             if evict_idx >= 0:
                 prev = all_blocks[evict_idx]
-                if next(prev.parameters(), None) is not None:
-                    if next(prev.parameters()).device.type != "cpu":
-                        prev.to("cpu")
+                prev_params = list(prev.parameters())
+                if prev_params and any(p.device.type != "cpu" for p in prev_params):
+                    prev.to("cpu")
 
             # BUG FIX: move input tensors to GPU before calling forward.
             # block.to(device) moves the weights, but args/kwargs still

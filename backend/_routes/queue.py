@@ -17,7 +17,10 @@ def route_queue_add(
     handler: AppHandler = Depends(get_state_service),
 ) -> dict:
     """POST /api/queue/add — enqueue a video generation job."""
-    job = handler.queue.add_job(req)
+    # Snapshot the current LoRA config so that changes made after this call
+    # don't affect the job when it eventually runs.
+    civitai_loras_now = handler.state.app_settings.civitai_loras
+    job = handler.queue.add_job(req, civitai_loras=civitai_loras_now)
     return {"id": job.id, "status": job.status, "created_at": job.created_at}
 
 
@@ -41,6 +44,7 @@ def route_queue_list(
                 "fps": j.request.fps,
                 "model": j.request.model,
                 "aspect_ratio": j.request.aspectRatio,
+                "civitai_loras_snapshot": j.civitai_loras_snapshot,
             }
             for j in jobs
         ]

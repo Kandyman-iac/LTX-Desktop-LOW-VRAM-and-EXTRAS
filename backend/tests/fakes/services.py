@@ -495,10 +495,16 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
         attention_tile_size: int = 0,
         use_fp8_transformer: bool = False,
         gguf_transformer_path: str = "",
+        vae_spatial_tile_size: int = 0,
+        vae_temporal_tile_size: int = 0,
+        pre_quantized_transformer_path: str = "",
+        loras: list[object] | None = None,
     ) -> "FakeFastVideoPipeline":
         del checkpoint_path, gemma_root, upsampler_path, device
         del transformer_device, block_swap_blocks_on_gpu, attention_tile_size
         del use_fp8_transformer, gguf_transformer_path
+        del vae_spatial_tile_size, vae_temporal_tile_size
+        del pre_quantized_transformer_path, loras
         pipeline = FakeFastVideoPipeline._singleton
         if pipeline is None:
             raise RuntimeError("FakeFastVideoPipeline singleton is not bound")
@@ -514,6 +520,9 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
         frame_rate: float,
         images: list[ImageConditioningInput],
         output_path: str,
+        num_steps: int = 8,
+        stg_scale: float = 0.0,
+        stg_block_index: int = 19,
     ) -> None:
         self._record_generate(
             {
@@ -525,6 +534,9 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
                 "frame_rate": frame_rate,
                 "images": images,
                 "output_path": output_path,
+                "num_steps": num_steps,
+                "stg_scale": stg_scale,
+                "stg_block_index": stg_block_index,
             }
         )
 
