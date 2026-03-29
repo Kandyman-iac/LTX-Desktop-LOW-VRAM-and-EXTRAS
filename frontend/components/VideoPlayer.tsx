@@ -561,13 +561,13 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
                   {/* Add AI Audio */}
                   {videoPath && (
                     <Button
-                      size="icon"
                       variant="ghost"
                       onClick={() => setShowAudioPanel(v => !v)}
-                      className={`h-8 w-8 hover:bg-zinc-800 ${showAudioPanel || activeAudioComplete ? 'text-violet-400' : 'text-zinc-400 hover:text-white'}`}
-                      title="Add AI Audio"
+                      className={`h-8 px-2 gap-1.5 text-xs font-medium hover:bg-zinc-800 ${showAudioPanel || activeAudioComplete ? 'text-violet-400' : 'text-zinc-400 hover:text-white'}`}
+                      title="Add AI-generated audio to this video"
                     >
-                      <Music className="h-4 w-4" />
+                      <Music className="h-3.5 w-3.5" />
+                      {activeAudioComplete ? 'Audio ✓' : 'Add Audio'}
                     </Button>
                   )}
                 </div>
