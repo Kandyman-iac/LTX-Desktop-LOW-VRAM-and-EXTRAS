@@ -38,7 +38,7 @@ def route_queue_list(
                 "result_path": j.result_path,
                 "error": j.error,
                 "created_at": j.created_at,
-                "prompt": j.request.prompt[:80],
+                "prompt": j.request.prompt,
                 "resolution": j.request.resolution,
                 "duration": j.request.duration,
                 "fps": j.request.fps,

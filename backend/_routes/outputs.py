@@ -33,6 +33,8 @@ class OutputEntry(BaseModel):
     aspect_ratio: str | None = None
     camera_motion: str | None = None
     timestamp: str | None = None
+    loras: list[dict] | None = None
+    render_time_seconds: float | None = None
 
 
 class OutputsResponse(BaseModel):
@@ -88,6 +90,8 @@ def route_list_outputs(
                 entry.aspect_ratio = meta.get("aspect_ratio")
                 entry.camera_motion = meta.get("camera_motion")
                 entry.timestamp = meta.get("timestamp")
+                entry.loras = meta.get("loras") or None
+                entry.render_time_seconds = meta.get("render_time_seconds")
             except Exception:
                 pass
 

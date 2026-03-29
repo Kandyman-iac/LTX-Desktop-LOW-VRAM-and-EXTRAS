@@ -14,6 +14,7 @@ from handlers.retake_handler import RetakeHandler
 from handlers.runtime_policy_handler import RuntimePolicyHandler
 from handlers.settings_handler import SettingsHandler
 from handlers.text_handler import TextHandler
+from handlers.magi_handler import MagiHandler
 from handlers.queue_handler import QueueHandler
 from handlers.video_generation_handler import VideoGenerationHandler
 
@@ -33,5 +34,6 @@ __all__ = [
     "RetakeHandler",
     "RuntimePolicyHandler",
     "IcLoraHandler",
+    "MagiHandler",
     "QueueHandler",
 ]

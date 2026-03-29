@@ -136,6 +136,7 @@ class VideoGenerationHandler(StateHandlerBase):
             self._pipelines.load_gpu_pipeline("fast", should_warm=False)
             self._generation.start_generation(generation_id)
 
+            t_gen_start = time.perf_counter()
             output_path = self.generate_video(
                 prompt=req.enhancedPrompt or req.prompt,
                 image=image,
@@ -151,6 +152,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 stg_scale_override=req.stgScale,
                 stg_block_index_override=req.stgBlockIndex,
             )
+            render_time = time.perf_counter() - t_gen_start
 
             self._write_sidecar(
                 video_path=output_path,
@@ -167,6 +169,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 camera_motion=req.cameraMotion,
                 model=req.model,
                 seed=seed,
+                render_time_seconds=render_time,
             )
 
             self._generation.complete_generation(output_path)
@@ -503,8 +506,22 @@ class VideoGenerationHandler(StateHandlerBase):
         model: str,
         seed: int,
         enhanced_prompt: str | None = None,
+        render_time_seconds: float | None = None,
     ) -> None:
         settings = self.state.app_settings
+        # Collect active LoRAs (name + strength) for the sidecar
+        active_loras: list[dict] = []
+        if settings.civitai_loras:
+            try:
+                import json as _json
+                for entry in _json.loads(settings.civitai_loras):
+                    if entry.get("enabled", True):
+                        active_loras.append({
+                            "name": Path(entry["path"]).name,
+                            "strength": entry.get("strength", 1.0),
+                        })
+            except Exception:
+                pass
         sidecar = {
             "timestamp": datetime.now().isoformat(),
             "prompt": prompt,
@@ -520,10 +537,12 @@ class VideoGenerationHandler(StateHandlerBase):
             "aspect_ratio": aspect_ratio,
             "camera_motion": camera_motion,
             "seed": seed,
+            "render_time_seconds": round(render_time_seconds, 1) if render_time_seconds is not None else None,
             "block_swap_blocks_on_gpu": settings.block_swap_blocks_on_gpu,
             "use_fp8_transformer": settings.use_fp8_transformer,
             "attention_tile_size": settings.attention_tile_size,
             "use_multi_gpu": settings.use_multi_gpu,
+            "loras": active_loras if active_loras else None,
         }
         sidecar_path = Path(video_path).with_suffix(".json")
         try:

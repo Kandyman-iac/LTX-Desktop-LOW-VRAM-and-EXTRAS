@@ -315,3 +315,31 @@ class IcLoraGenerateRequest(BaseModel):
     cfg_guidance_scale: float = 1.0
     negative_prompt: str = ""
     images: list[IcLoraImageInput] = Field(default_factory=_default_ic_lora_images)
+
+
+# ============================================================
+# MagiHuman request / response types
+# ============================================================
+
+
+class MagiGenerateRequest(BaseModel):
+    prompt: NonEmptyPrompt
+    image_path: str       # Windows filesystem path to conditioning image
+    seconds: int = 5
+    width: int = 448
+    height: int = 256
+    gpus: int = 2
+    seed: int | None = None
+    sr: bool = False      # Super-resolution 2× upscale via 540p_sr model
+
+
+class MagiProgressResponse(BaseModel):
+    status: str           # idle | running | complete | error | cancelled
+    output_path: str | None = None
+    error: str | None = None
+    log_tail: str = ""
+    sr_model_ready: bool = False   # True once 540p_sr model is downloaded
+
+
+class MagiGenerateResponse(BaseModel):
+    status: str

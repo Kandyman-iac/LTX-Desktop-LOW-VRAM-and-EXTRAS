@@ -14,6 +14,7 @@ import { Button } from '../components/ui/button'
 import { useGeneration } from '../hooks/use-generation'
 import { useRetake } from '../hooks/use-retake'
 import { useIcLora } from '../hooks/use-ic-lora'
+import { useMagi } from '../hooks/use-magi'
 import { useBackend } from '../hooks/use-backend'
 import { useProjects } from '../contexts/ProjectContext'
 import { useAppSettings } from '../contexts/AppSettingsContext'
@@ -21,6 +22,8 @@ import { fileUrlToPath } from '../lib/url-to-path'
 import { sanitizeForcedApiVideoSettings } from '../lib/api-video-options'
 import { RetakePanel } from '../components/RetakePanel'
 import { ICLoraPanel, CONDITIONING_TYPES, type ICLoraConditioningType } from '../components/ICLoraPanel'
+import { MagiPanel, type MagiPanelState } from '../components/MagiPanel'
+import { InferencePanel, type InferenceOverrides } from '../components/InferencePanel'
 import { useGenerationHistory, type HistoryEntry } from '../hooks/use-generation-history'
 import { useEncodePrompt } from '../hooks/use-encode-prompt'
 import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
@@ -56,6 +59,16 @@ export function Playground() {
   ])
   const [selectedAudio, setSelectedAudio] = useState<string | null>(null)
   const [settings, setSettings] = useState<GenerationSettings>(() => ({ ...DEFAULT_SETTINGS }))
+  const inferenceDefaults: InferenceOverrides = {
+    numSteps: appSettings.distilledNumSteps,
+    stgScale: appSettings.stgScale,
+    stgBlockIndex: appSettings.stgBlockIndex,
+  }
+  const [inferenceOverrides, setInferenceOverrides] = useState<InferenceOverrides>({
+    numSteps: appSettings.distilledNumSteps,
+    stgScale: appSettings.stgScale,
+    stgBlockIndex: appSettings.stgBlockIndex,
+  })
   const [showHistory, setShowHistory] = useState(false)
   const [showOutputBrowser, setShowOutputBrowser] = useState(false)
   const { push: pushHistory, getAll: getHistory, remove: removeHistory } = useGenerationHistory()
@@ -201,6 +214,35 @@ export function Playground() {
     icLoraResult,
   } = useIcLora()
 
+  const {
+    submitMagi,
+    cancelMagi,
+    resetMagi,
+    isMagiGenerating,
+    magiStatus,
+    magiError,
+    magiResult,
+    magiLogTail,
+    magiSrModelReady,
+  } = useMagi()
+
+  // Parse step progress from magi log tail.
+  // Skips checkpoint shard loading lines — only counts actual diffusion steps.
+  const magiProgress = useMemo(() => {
+    if (!magiLogTail) return 0
+    const lines = magiLogTail.split('\n').filter(l => !/checkpoint/i.test(l))
+    const filtered = lines.join('\n')
+    // tqdm fraction: "4/8 [" — find the last occurrence
+    const fracMatches = [...filtered.matchAll(/\b(\d+)\/(\d+)\s*\[/g)]
+    if (fracMatches.length > 0) {
+      const last = fracMatches[fracMatches.length - 1]
+      const num = parseInt(last[1], 10)
+      const den = parseInt(last[2], 10)
+      if (den > 0) return Math.round((num / den) * 100)
+    }
+    return 0
+  }, [magiLogTail])
+
   const [retakeInput, setRetakeInput] = useState({
     videoUrl: null as string | null,
     videoPath: null as string | null,
@@ -220,11 +262,36 @@ export function Playground() {
   const [icLoraPanelKey, setIcLoraPanelKey] = useState(0)
   const [icLoraCondType, setIcLoraCondType] = useState<ICLoraConditioningType>('canny')
   const [icLoraStrength, setIcLoraStrength] = useState(1.0)
+  const [magiInput, setMagiInput] = useState<MagiPanelState>({
+    imagePath: null,
+    seconds: 5,
+    width: 448,
+    height: 256,
+    gpus: 2,
+    seed: undefined,
+    sr: false,
+    ready: false,
+  })
 
   // Ref to store generated image URL for "Create video" flow
   const generatedImageRef = useRef<string | null>(null)
 
   const handleGenerate = () => {
+    if (mode === 'magi-human') {
+      if (!magiInput.ready || !magiInput.imagePath || !prompt.trim()) return
+      void submitMagi({
+        prompt,
+        imagePath: magiInput.imagePath,
+        seconds: magiInput.seconds,
+        width: magiInput.width,
+        height: magiInput.height,
+        gpus: magiInput.gpus,
+        seed: magiInput.seed,
+        sr: magiInput.sr,
+      })
+      return
+    }
+
     if (mode === 'ic-lora') {
       if (!icLoraInput.videoPath || !icLoraInput.ready || !prompt.trim()) return
       submitIcLora({
@@ -253,9 +320,12 @@ export function Playground() {
       // Text-to-image behavior remains tied to raw forceApiGenerations in useGeneration.
       generateImage(prompt, settings)
     } else {
-      const effectiveVideoSettings = shouldVideoGenerateWithLtxApi
-        ? sanitizeForcedApiVideoSettings(settings)
-        : settings
+      const effectiveVideoSettings = {
+        ...(shouldVideoGenerateWithLtxApi ? sanitizeForcedApiVideoSettings(settings) : settings),
+        numSteps: inferenceOverrides.numSteps,
+        stgScale: inferenceOverrides.stgScale,
+        stgBlockIndex: inferenceOverrides.stgBlockIndex,
+      }
       // Auto-detect: if any conditioning image is loaded → I2V/multi-frame, otherwise → T2V
       if (!prompt.trim()) return
       const audioPath = selectedAudio ? fileUrlToPath(selectedAudio) : null
@@ -266,9 +336,12 @@ export function Playground() {
   
   const handleAddToQueue = () => {
     if (!prompt.trim() || mode === 'text-to-image' || isRetakeMode || isIcLoraMode) return
-    const effectiveVideoSettings = shouldVideoGenerateWithLtxApi
-      ? sanitizeForcedApiVideoSettings(settings)
-      : settings
+    const effectiveVideoSettings = {
+      ...(shouldVideoGenerateWithLtxApi ? sanitizeForcedApiVideoSettings(settings) : settings),
+      numSteps: inferenceOverrides.numSteps,
+      stgScale: inferenceOverrides.stgScale,
+      stgBlockIndex: inferenceOverrides.stgBlockIndex,
+    }
     const audioPath = selectedAudio ? fileUrlToPath(selectedAudio) : null
     void addToQueue(prompt, null, effectiveVideoSettings, audioPath, negativePrompt, conditioningFrames)
   }
@@ -319,8 +392,10 @@ export function Playground() {
     setIcLoraPanelKey((prev) => prev + 1)
     setIcLoraCondType('canny')
     setIcLoraStrength(1.0)
+    setMagiInput({ imagePath: null, seconds: 5, width: 448, height: 256, gpus: 2, seed: undefined, ready: false })
     resetRetake()
     resetIcLora()
+    resetMagi()
     reset()
   }
 
@@ -336,14 +411,17 @@ export function Playground() {
 
   const isRetakeMode = mode === 'retake'
   const isIcLoraMode = mode === 'ic-lora'
+  const isMagiMode = mode === 'magi-human'
   const isVideoMode = mode === 'text-to-video' || mode === 'image-to-video'
-  const isBusy = isRetakeMode ? isRetaking : isIcLoraMode ? isIcLoraGenerating : isGenerating
-  const canGenerate = processStatus === 'alive' && !isBusy && (
+  const isBusy = isRetakeMode ? isRetaking : isIcLoraMode ? isIcLoraGenerating : isMagiMode ? isMagiGenerating : isGenerating
+  const canGenerate = (isMagiMode || processStatus === 'alive') && !isBusy && (
     isRetakeMode
       ? retakeInput.ready && !!retakeInput.videoPath
       : isIcLoraMode
         ? icLoraInput.ready && !!icLoraInput.videoPath && !!prompt.trim()
-        : !!prompt.trim()
+        : isMagiMode
+          ? magiInput.ready && !!magiInput.imagePath && !!prompt.trim()
+          : !!prompt.trim()
   )
 
   return (
@@ -359,8 +437,8 @@ export function Playground() {
             <ArrowLeft className="h-5 w-5 text-zinc-400" />
           </button>
           <div className="flex items-center gap-2.5">
-            <LtxLogo className="h-6 w-auto text-white" />
-            <span className="text-zinc-400 text-base font-medium tracking-wide leading-none pt-1 pl-1.5">Playground</span>
+            <LtxLogo className="text-2xl text-white" />
+            <span className="text-zinc-400 text-base font-medium tracking-wide leading-none pl-1.5">Playground</span>
           </div>
         </div>
         
@@ -420,6 +498,14 @@ export function Playground() {
                 isProcessing={isRetaking}
                 processingStatus={retakeStatus}
                 onChange={(data) => setRetakeInput(data)}
+              />
+            )}
+
+            {isMagiMode && (
+              <MagiPanel
+                isProcessing={isMagiGenerating}
+                srModelReady={magiSrModelReady}
+                onChange={setMagiInput}
               />
             )}
 
@@ -738,8 +824,17 @@ export function Playground() {
               </div>
             </div>
 
+            {/* Magi log tail */}
+            {isMagiMode && magiLogTail && (
+              <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-lg">
+                <pre className="text-[10px] text-zinc-400 whitespace-pre-wrap break-all max-h-32 overflow-y-auto font-mono">
+                  {magiLogTail}
+                </pre>
+              </div>
+            )}
+
             {/* Settings */}
-            {!isRetakeMode && !isIcLoraMode && (
+            {!isRetakeMode && !isIcLoraMode && !isMagiMode && (
               <SettingsPanel
                 settings={settings}
                 onSettingsChange={setSettings}
@@ -751,16 +846,16 @@ export function Playground() {
             )}
 
             {/* Error Display */}
-            {(generationError || retakeError || icLoraError) && (
+            {(generationError || retakeError || icLoraError || magiError) && (
               <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm">
-                {(generationError || retakeError || icLoraError)!.includes('TEXT_ENCODING_NOT_CONFIGURED') ? (
+                {(generationError || retakeError || icLoraError || magiError)!.includes('TEXT_ENCODING_NOT_CONFIGURED') ? (
                   <div className="space-y-2">
                     <p className="text-red-400 font-medium">Text encoding not configured</p>
                     <p className="text-red-400/80">
                       To generate videos, you need to set up text encoding in Settings.
                     </p>
                   </div>
-                ) : (generationError || retakeError || icLoraError)!.includes('TEXT_ENCODER_NOT_DOWNLOADED') ? (
+                ) : (generationError || retakeError || icLoraError || magiError)!.includes('TEXT_ENCODER_NOT_DOWNLOADED') ? (
                   <div className="space-y-2">
                     <p className="text-red-400 font-medium">Text encoder not downloaded</p>
                     <p className="text-red-400/80">
@@ -768,7 +863,7 @@ export function Playground() {
                     </p>
                   </div>
                 ) : (
-                  <span className="text-red-400">{generationError || retakeError || icLoraError}</span>
+                  <span className="text-red-400">{generationError || retakeError || icLoraError || magiError}</span>
                 )}
               </div>
             )}
@@ -785,7 +880,7 @@ export function Playground() {
                 Clear all
               </Button>
 
-              {!isRetakeMode && !isIcLoraMode && mode !== 'text-to-image' && (
+              {!isRetakeMode && !isIcLoraMode && !isMagiMode && mode !== 'text-to-image' && (
                 <Button
                   variant="outline"
                   onClick={handleAddToQueue}
@@ -802,7 +897,15 @@ export function Playground() {
                 </Button>
               )}
 
-              {isGenerating ? (
+              {isMagiGenerating ? (
+                <Button
+                  onClick={cancelMagi}
+                  className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white"
+                >
+                  <Square className="h-4 w-4" />
+                  Stop MagiHuman
+                </Button>
+              ) : isGenerating ? (
                 <Button
                   onClick={cancel}
                   className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white"
@@ -816,7 +919,12 @@ export function Playground() {
                   disabled={!canGenerate}
                   className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white disabled:bg-zinc-700 disabled:text-zinc-500"
                 >
-                  {isRetakeMode ? (
+                  {isMagiMode ? (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      {isMagiGenerating ? 'Generating...' : 'Generate MagiHuman'}
+                    </>
+                  ) : isRetakeMode ? (
                     <>
                       <Scissors className="h-4 w-4" />
                       {isRetaking ? 'Retaking...' : 'Retake'}
@@ -845,9 +953,19 @@ export function Playground() {
           </div>
         </div>
 
-        {/* Right Panel - Result Preview */}
-        <div className="flex-1 p-6">
-          {mode === 'text-to-image' ? (
+        {/* Right Panel - Result Preview + Inference Overrides */}
+        <div className="flex-1 flex gap-4 p-6 min-w-0">
+          <div className="flex-1 min-w-0">
+          {mode === 'magi-human' ? (
+            <VideoPlayer
+              videoUrl={magiResult?.videoUrl || null}
+              videoPath={magiResult?.videoPath || null}
+              videoResolution="540p"
+              isGenerating={isMagiGenerating}
+              progress={magiProgress}
+              statusMessage={magiStatus}
+            />
+          ) : mode === 'text-to-image' ? (
             <ImageResult
               imageUrl={imageUrl}
               isGenerating={isGenerating}
@@ -881,6 +999,17 @@ export function Playground() {
               isGenerating={isGenerating}
               progress={progress}
               statusMessage={statusMessage}
+            />
+          )}
+          </div>
+
+          {/* Inference overrides panel — only for T2V/I2V modes */}
+          {mode !== 'magi-human' && mode !== 'text-to-image' && mode !== 'retake' && mode !== 'ic-lora' && (
+            <InferencePanel
+              overrides={inferenceOverrides}
+              defaults={inferenceDefaults}
+              onChange={setInferenceOverrides}
+              disabled={isGenerating}
             />
           )}
         </div>

@@ -14,6 +14,7 @@ from handlers import (
     HealthHandler,
     IcLoraHandler,
     ImageGenerationHandler,
+    MagiHandler,
     ModelsHandler,
     PipelinesHandler,
     QueueHandler,
@@ -234,6 +235,8 @@ class AppHandler:
             video_processor=video_processor,
             config=config,
         )
+
+        self.magi = MagiHandler(outputs_dir=config.outputs_dir)
 
         self.downloads.cleanup_downloading_dir()
         self.models.refresh_available_files()
