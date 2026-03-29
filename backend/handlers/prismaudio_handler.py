@@ -1,4 +1,9 @@
-"""PrismAudio handler — runs ThinkSound/PrismAudio video-to-audio inference natively on Windows."""
+"""PrismAudio handler — runs ThinkSound/PrismAudio video-to-audio inference.
+
+Supports two modes controlled by _USE_WSL:
+  False (default) — native Windows, uses conda env or direct Python executable
+  True            — WSL2 subprocess (same pattern as MMAudio/MagiHuman)
+"""
 
 from __future__ import annotations
 
@@ -25,9 +30,26 @@ PrismAudioStatus = Literal["idle", "running", "complete", "error", "cancelled"]
 # ---------------------------------------------------------------------------
 # Configurable constants — adjust to match your local PrismAudio install.
 # ---------------------------------------------------------------------------
-_PRISMAUDIO_DIR = "C:/AI/ThinkSound"
+
+# Set True to run PrismAudio inside WSL2 (Linux) instead of native Windows.
+_USE_WSL = False
+
+# --- Windows-native settings (used when _USE_WSL = False) ---
+_PRISMAUDIO_DIR_WIN = "C:/AI/ThinkSound"
 _PRISMAUDIO_CONDA_ENV = "prismaudio"
-_PRISMAUDIO_PYTHON: str | None = None  # e.g. r"C:\miniconda3\envs\prismaudio\python.exe"
+# Set to a direct Python path to skip conda run entirely, e.g.:
+#   r"C:\miniconda3\envs\prismaudio\python.exe"
+_PRISMAUDIO_PYTHON_WIN: str | None = None
+
+# --- WSL settings (used when _USE_WSL = True) ---
+_WSL_DISTRO = "Ubuntu-24.04"
+_WSL_USER = "mike_hunt"
+_PRISMAUDIO_DIR_WSL = "/home/mike_hunt/ThinkSound"
+_PRISMAUDIO_CONDA_ENV_WSL = "prismaudio"
+# Set to a direct Python path inside WSL to skip conda run, e.g.:
+#   "/home/mike_hunt/miniconda3/envs/prismaudio/bin/python"
+_PRISMAUDIO_PYTHON_WSL: str | None = None
+
 _MAX_LOG_LINES = 200
 
 
@@ -41,7 +63,7 @@ class _PrismAudioJob:
 
 
 class PrismAudioHandler:
-    """Runs PrismAudio (ThinkSound) video-to-audio inference in a background thread on Windows."""
+    """Runs PrismAudio (ThinkSound) video-to-audio inference in a background thread."""
 
     def __init__(self, outputs_dir: Path) -> None:
         self._outputs_dir = outputs_dir
@@ -86,59 +108,45 @@ class PrismAudioHandler:
     # ------------------------------------------------------------------
 
     def _run(self, req: PrismAudioGenerateRequest) -> None:
+        if _USE_WSL:
+            self._run_wsl(req)
+        else:
+            self._run_windows(req)
+
+    # ------------------------------------------------------------------
+    # Windows-native path
+    # ------------------------------------------------------------------
+
+    def _run_windows(self, req: PrismAudioGenerateRequest) -> None:
         stem = f"prismaudio_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         out_dir = tempfile.mkdtemp(prefix="prismaudio_")
 
-        # Build the inference command.
-        if _PRISMAUDIO_PYTHON:
-            inner_cmd: list[str] = [
-                _PRISMAUDIO_PYTHON,
-                "infer.py",
-                "--video_path", req.video_path,
-                "--save_dir", out_dir,
-            ]
+        if _PRISMAUDIO_PYTHON_WIN:
+            cmd: list[str] = [_PRISMAUDIO_PYTHON_WIN, "infer.py"]
         else:
-            inner_cmd = [
-                "conda", "run",
-                "-n", _PRISMAUDIO_CONDA_ENV,
-                "--no-capture-output",
-                "python", "infer.py",
-                "--video_path", req.video_path,
-                "--save_dir", out_dir,
-            ]
+            cmd = ["conda", "run", "-n", _PRISMAUDIO_CONDA_ENV, "--no-capture-output", "python", "infer.py"]
 
+        cmd += ["--video_path", req.video_path, "--save_dir", out_dir]
         if req.prompt.strip():
-            inner_cmd += ["--text_prompt", req.prompt]
+            cmd += ["--text_prompt", req.prompt]
         if req.seed is not None:
-            inner_cmd += ["--seed", str(req.seed)]
+            cmd += ["--seed", str(req.seed)]
 
-        logger.info(
-            "[prismaudio] Starting: video=%s prompt=%r seed=%s",
-            req.video_path, req.prompt, req.seed,
-        )
+        logger.info("[prismaudio/win] Starting: video=%s prompt=%r", req.video_path, req.prompt)
 
         try:
             process = subprocess.Popen(
-                inner_cmd,
-                cwd=_PRISMAUDIO_DIR,
-                stdout=PIPE,
-                stderr=STDOUT,
-                text=True,
-                bufsize=1,
-                encoding="utf-8",
-                errors="replace",
+                cmd,
+                cwd=_PRISMAUDIO_DIR_WIN,
+                stdout=PIPE, stderr=STDOUT,
+                text=True, bufsize=1, encoding="utf-8", errors="replace",
             )
             with self._lock:
                 self._job.process = process
 
             assert process.stdout is not None
             for line in process.stdout:
-                line = line.rstrip()
-                logger.info("[prismaudio] %s", line)
-                with self._lock:
-                    self._job.log_lines.append(line)
-                    if len(self._job.log_lines) > _MAX_LOG_LINES:
-                        self._job.log_lines = self._job.log_lines[-_MAX_LOG_LINES:]
+                self._append_log(line.rstrip())
 
             process.wait()
 
@@ -152,20 +160,91 @@ class PrismAudioHandler:
                     shutil.rmtree(out_dir, ignore_errors=True)
                     return
 
-            # Find output MP4 (PrismAudio writes a merged WAV + MP4 to save_dir).
-            matches = glob.glob(f"{out_dir}/*.mp4")
-            if not matches:
-                shutil.rmtree(out_dir, ignore_errors=True)
+            self._copy_output(out_dir, stem)
+
+        except Exception as exc:
+            logger.exception("[prismaudio/win] Unexpected error")
+            shutil.rmtree(out_dir, ignore_errors=True)
+            with self._lock:
+                self._job.status = "error"
+                self._job.error = str(exc)
+
+    # ------------------------------------------------------------------
+    # WSL path
+    # ------------------------------------------------------------------
+
+    def _run_wsl(self, req: PrismAudioGenerateRequest) -> None:
+        stem = f"prismaudio_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        wsl_out_dir = f"/tmp/prismaudio_out_{stem}"
+        wsl_video_path = _win_to_wsl_path(req.video_path)
+
+        if _PRISMAUDIO_PYTHON_WSL:
+            py_prefix = _PRISMAUDIO_PYTHON_WSL
+        else:
+            py_prefix = f"conda run -n {_PRISMAUDIO_CONDA_ENV_WSL} --no-capture-output python"
+
+        # Escape single quotes in prompt
+        safe_prompt = req.prompt.replace("'", "'\\''")
+        inner = (
+            f"mkdir -p '{wsl_out_dir}' && "
+            f"cd '{_PRISMAUDIO_DIR_WSL}' && "
+            f"{py_prefix} infer.py"
+            f" --video_path '{wsl_video_path}'"
+            f" --save_dir '{wsl_out_dir}'"
+        )
+        if req.prompt.strip():
+            inner += f" --text_prompt '{safe_prompt}'"
+        if req.seed is not None:
+            inner += f" --seed {req.seed}"
+
+        cmd = ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", inner]
+        logger.info("[prismaudio/wsl] Starting: video=%s prompt=%r", req.video_path, req.prompt)
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=PIPE, stderr=STDOUT,
+                text=True, bufsize=1, encoding="utf-8", errors="replace",
+            )
+            with self._lock:
+                self._job.process = process
+
+            assert process.stdout is not None
+            for line in process.stdout:
+                self._append_log(line.rstrip())
+
+            process.wait()
+
+            with self._lock:
+                if self._job.status == "cancelled":
+                    return
+                if process.returncode != 0:
+                    self._job.status = "error"
+                    self._job.error = f"PrismAudio exited with code {process.returncode}"
+                    return
+
+            # Copy output from WSL to Windows outputs dir
+            win_out = self._outputs_dir / f"{stem}.mp4"
+            win_wsl = _win_to_wsl_path(str(win_out))
+
+            copy_bash = (
+                f"f=$(ls -t '{wsl_out_dir}'/*.mp4 2>/dev/null | head -1); "
+                f"[ -n \"$f\" ] && cp \"$f\" '{win_wsl}' && echo OK || echo NOTFOUND"
+            )
+            cp = subprocess.run(
+                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", copy_bash],
+                capture_output=True, text=True,
+            )
+            # Cleanup WSL temp dir
+            subprocess.run(
+                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", f"rm -rf '{wsl_out_dir}'"],
+                capture_output=True,
+            )
+            if "OK" not in cp.stdout:
                 with self._lock:
                     self._job.status = "error"
-                    self._job.error = "PrismAudio output MP4 not found in temp directory"
+                    self._job.error = f"PrismAudio output not found after generation. stderr: {cp.stderr.strip()}"
                 return
-
-            win_out = self._outputs_dir / f"{stem}.mp4"
-            shutil.copy2(matches[0], win_out)
-
-            # Clean up temp dir now that we have the file.
-            shutil.rmtree(out_dir, ignore_errors=True)
 
             with self._lock:
                 self._job.status = "complete"
@@ -173,8 +252,50 @@ class PrismAudioHandler:
                 self._job.log_lines.append(f"✓ Output: {win_out}")
 
         except Exception as exc:
-            logger.exception("[prismaudio] Unexpected error")
-            shutil.rmtree(out_dir, ignore_errors=True)
+            logger.exception("[prismaudio/wsl] Unexpected error")
             with self._lock:
                 self._job.status = "error"
                 self._job.error = str(exc)
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    def _append_log(self, line: str) -> None:
+        logger.info("[prismaudio] %s", line)
+        with self._lock:
+            self._job.log_lines.append(line)
+            if len(self._job.log_lines) > _MAX_LOG_LINES:
+                self._job.log_lines = self._job.log_lines[-_MAX_LOG_LINES:]
+
+    def _copy_output(self, out_dir: str, stem: str) -> None:
+        """Find the output MP4, copy to outputs_dir, clean up temp dir."""
+        matches = glob.glob(f"{out_dir}/*.mp4")
+        if not matches:
+            shutil.rmtree(out_dir, ignore_errors=True)
+            with self._lock:
+                self._job.status = "error"
+                self._job.error = "PrismAudio output MP4 not found in temp directory"
+            return
+
+        win_out = self._outputs_dir / f"{stem}.mp4"
+        shutil.copy2(matches[0], win_out)
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+        with self._lock:
+            self._job.status = "complete"
+            self._job.output_path = str(win_out)
+            self._job.log_lines.append(f"✓ Output: {win_out}")
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def _win_to_wsl_path(win_path: str) -> str:
+    """Convert C:\\Users\\... → /mnt/c/Users/..."""
+    p = win_path.replace("\\", "/")
+    if len(p) >= 2 and p[1] == ":":
+        drive = p[0].lower()
+        p = f"/mnt/{drive}{p[2:]}"
+    return p
