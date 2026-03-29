@@ -1,5 +1,5 @@
-import { AlertCircle, Check, Download, Film, Folder, Info, KeyRound, Plus, Settings, Sliders, Sparkles, X, Zap } from 'lucide-react'
-import React, { useEffect, useRef, useState } from 'react'
+import { AlertCircle, Check, Download, Film, Folder, Info, KeyRound, Plus, Settings, Sliders, Sparkles, Wrench, X, Zap } from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import { useAppSettings, type AppSettings } from '../contexts/AppSettingsContext'
 import { backendFetch } from '../lib/backend'
@@ -18,7 +18,7 @@ interface SettingsModalProps {
   initialTab?: TabId
 }
 
-type TabId = 'general' | 'apiKeys' | 'inference' | 'promptEnhancer' | 'about'
+type TabId = 'general' | 'apiKeys' | 'inference' | 'promptEnhancer' | 'about' | 'tools'
 
 function FlushVramButton() {
   const [status, setStatus] = useState<'idle' | 'flushing' | 'done' | 'error'>('idle')
@@ -66,6 +66,113 @@ function FlushVramButton() {
         {status === 'flushing' ? 'Flushing…' : status === 'done' ? 'Done' : status === 'error' ? 'Error' : 'Flush'}
       </button>
     </div>
+  )
+}
+
+// ── Tool status types ──────────────────────────────────────────
+interface ToolStatus { name: string; available: boolean; detail: string }
+interface ToolsStatusResponse { tools: ToolStatus[]; wsl_available: boolean }
+
+const TOOL_META: Record<string, { label: string; desc: string; installer: string }> = {
+  MMAudio:     { label: 'MMAudio',     desc: 'Video → synchronized audio/music (WSL)',       installer: 'install-mmaudio.ps1' },
+  PrismAudio:  { label: 'PrismAudio',  desc: 'Video → Foley/SFX with CoT sync (Windows)',     installer: 'install-prismaudio.ps1' },
+  MagiHuman:   { label: 'MagiHuman',   desc: 'Image → human animation video (WSL)',            installer: '(manual — see daVinci repo)' },
+}
+
+function ToolsTabContent() {
+  const [data, setData] = useState<ToolsStatusResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetch_ = useCallback(async () => {
+    setLoading(true); setError(null)
+    try {
+      const res = await backendFetch('/api/tools/status')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setData(await res.json())
+    } catch (e) { setError(String(e)) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { fetch_() }, [fetch_])
+
+  return (
+    <div className="space-y-4 p-6">
+      {/* WSL badge */}
+      {data && (
+        <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${data.wsl_available ? 'bg-emerald-900/30 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}>
+          {data.wsl_available
+            ? <Check className="h-3.5 w-3.5 flex-shrink-0" />
+            : <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />}
+          <span>{data.wsl_available ? 'WSL available' : 'WSL not detected — required for MMAudio and MagiHuman. Install from Microsoft Store.'}</span>
+        </div>
+      )}
+
+      {/* Tool cards */}
+      {!data && loading && (
+        <div className="space-y-2">
+          {[0,1,2].map(i => <div key={i} className="h-16 rounded-lg bg-zinc-800/50 animate-pulse" />)}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2 text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">
+          <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>Could not reach backend — is the app running? ({error})</span>
+        </div>
+      )}
+
+      {data?.tools.map(tool => {
+        const meta = TOOL_META[tool.name]
+        return (
+          <div key={tool.name} className="flex items-start gap-3 bg-zinc-800/50 border border-zinc-800 rounded-lg p-3">
+            <div className="mt-0.5">
+              {tool.available
+                ? <Check className="h-4 w-4 text-emerald-400" />
+                : <X className="h-4 w-4 text-red-400" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">{meta?.label ?? tool.name}</p>
+              {meta && <p className="text-[11px] text-zinc-500 mt-0.5">{meta.desc}</p>}
+              <p className="text-[11px] text-zinc-400 mt-1">{tool.detail}</p>
+              {!tool.available && meta && (
+                <p className="text-[11px] text-violet-400 mt-1">
+                  Installer: <span className="font-mono">{meta.installer}</span>
+                  {' '}— found in the <code className="text-zinc-300">installers/</code> folder
+                </p>
+              )}
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Refresh */}
+      <button
+        onClick={fetch_}
+        disabled={loading}
+        className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white disabled:opacity-50 transition-colors"
+      >
+        <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+        Refresh status
+      </button>
+
+      <p className="text-[11px] text-zinc-600">
+        Install scripts live in the <code className="text-zinc-400">installers/</code> directory.
+        Run <code className="text-zinc-400">installers\install-all.ps1</code> for a guided setup.
+      </p>
+    </div>
+  )
+}
+
+// ── RefreshCw icon (local re-export to avoid re-importing lucide) ──
+function RefreshCw({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+      <path d="M21 3v5h-5"/>
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+      <path d="M8 16H3v5"/>
+    </svg>
   )
 }
 
@@ -377,6 +484,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     { id: 'apiKeys' as TabId, label: 'API Keys', icon: KeyRound },
     { id: 'inference' as TabId, label: 'Inference', icon: Sliders },
     { id: 'promptEnhancer' as TabId, label: 'Prompt Enhancer', icon: Sparkles },
+    { id: 'tools' as TabId, label: 'Tools', icon: Wrench },
     { id: 'about' as TabId, label: 'About', icon: Info },
   ]
 
@@ -1696,6 +1804,11 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 </div>
               )}
             </>
+          )}
+
+          {/* ── Tools tab ── */}
+          {activeTab === 'tools' && (
+            <ToolsTabContent />
           )}
         </div>
 

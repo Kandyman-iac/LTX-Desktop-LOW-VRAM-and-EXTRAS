@@ -3,6 +3,9 @@ import { Play, Pause, Download, RefreshCw, RotateCcw, Volume2, VolumeX, Maximize
 import { Button } from './ui/button'
 import { logger } from '../lib/logger'
 import { useMMAudio } from '../hooks/use-mmaudio'
+import { usePrismAudio } from '../hooks/use-prismaudio'
+
+type AudioEngine = 'mmaudio' | 'prismaudio'
 
 interface VideoPlayerProps {
   videoUrl: string | null
@@ -40,27 +43,41 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
   const upscaledVideoRef = useRef<HTMLVideoElement>(null)
   const curtainContainerRef = useRef<HTMLDivElement>(null)
 
-  // MMAudio state
+  // Audio generation (dual-engine)
   const { state: mmAudioState, generate: mmAudioGenerate, cancel: mmAudioCancel, reset: mmAudioReset } = useMMAudio()
+  const { state: prismAudioState, generate: prismAudioGenerate, cancel: prismAudioCancel, reset: prismAudioReset } = usePrismAudio()
   const [showAudioPanel, setShowAudioPanel] = useState(false)
+  const [audioEngine, setAudioEngine] = useState<AudioEngine>('mmaudio')
   const [audioPrompt, setAudioPrompt] = useState('')
   const prevVideoPathRef2 = useRef<string | null>(null)
 
-  // Notify parent when MMAudio completes
+  const activeAudioState = audioEngine === 'mmaudio' ? mmAudioState : prismAudioState
+  const activeAudioComplete = audioEngine === 'mmaudio'
+    ? (mmAudioState.status === 'complete' && !!mmAudioState.outputUrl)
+    : (prismAudioState.status === 'complete' && !!prismAudioState.outputUrl)
+
+  // Notify parent when either engine completes
   useEffect(() => {
     if (mmAudioState.status === 'complete' && mmAudioState.outputPath && mmAudioState.outputUrl) {
       onAudioReady?.(mmAudioState.outputUrl, mmAudioState.outputPath)
     }
   }, [mmAudioState.status, mmAudioState.outputPath, mmAudioState.outputUrl, onAudioReady])
 
+  useEffect(() => {
+    if (prismAudioState.status === 'complete' && prismAudioState.outputPath && prismAudioState.outputUrl) {
+      onAudioReady?.(prismAudioState.outputUrl, prismAudioState.outputPath)
+    }
+  }, [prismAudioState.status, prismAudioState.outputPath, prismAudioState.outputUrl, onAudioReady])
+
   // Reset audio panel when the source video changes
   useEffect(() => {
     if (videoPath !== prevVideoPathRef2.current) {
       prevVideoPathRef2.current = videoPath ?? null
       mmAudioReset()
+      prismAudioReset()
       setShowAudioPanel(false)
     }
-  }, [videoPath, mmAudioReset])
+  }, [videoPath, mmAudioReset, prismAudioReset])
 
   // Calculate upscale target resolution first (needed for displayedResolution)
   const upscaleTargetResolution = videoResolution === '540p' ? '1080p' : videoResolution === '720p' ? '1440p' : '2160p'
@@ -541,14 +558,14 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
                     <Download className="h-4 w-4" />
                   </Button>
 
-                  {/* Add Audio (MMAudio) */}
+                  {/* Add AI Audio */}
                   {videoPath && (
                     <Button
                       size="icon"
                       variant="ghost"
                       onClick={() => setShowAudioPanel(v => !v)}
-                      className={`h-8 w-8 hover:bg-zinc-800 ${showAudioPanel || mmAudioState.status === 'complete' ? 'text-violet-400' : 'text-zinc-400 hover:text-white'}`}
-                      title="Add AI Audio (MMAudio)"
+                      className={`h-8 w-8 hover:bg-zinc-800 ${showAudioPanel || activeAudioComplete ? 'text-violet-400' : 'text-zinc-400 hover:text-white'}`}
+                      title="Add AI Audio"
                     >
                       <Music className="h-4 w-4" />
                     </Button>
@@ -558,58 +575,95 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
 
             </div>
 
-            {/* MMAudio inline panel */}
+            {/* AI Audio inline panel — dual engine */}
             {showAudioPanel && videoPath && (
               <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 space-y-2">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Add AI Audio</span>
+                {/* Header + engine tabs */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1 bg-zinc-800 rounded-md p-0.5">
+                    {(['mmaudio', 'prismaudio'] as AudioEngine[]).map(eng => (
+                      <button
+                        key={eng}
+                        onClick={() => setAudioEngine(eng)}
+                        disabled={activeAudioState.status === 'running'}
+                        className={`px-2.5 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
+                          audioEngine === eng
+                            ? 'bg-violet-700 text-white'
+                            : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {eng === 'mmaudio' ? 'MMAudio' : 'PrismAudio'}
+                      </button>
+                    ))}
+                  </div>
                   <button
-                    onClick={() => { setShowAudioPanel(false); if (mmAudioState.status !== 'running') mmAudioReset() }}
+                    onClick={() => {
+                      setShowAudioPanel(false)
+                      if (activeAudioState.status !== 'running') {
+                        mmAudioReset(); prismAudioReset()
+                      }
+                    }}
                     className="text-zinc-500 hover:text-white"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
 
+                {/* Engine description */}
+                <p className="text-[10px] text-zinc-500">
+                  {audioEngine === 'mmaudio'
+                    ? 'MMAudio — joint video+text → synchronized ambient/music (WSL, ~1.5 GB)'
+                    : 'PrismAudio — CoT Foley/SFX sync with spatial audio (Windows, ~4 GB)'}
+                </p>
+
                 {/* Prompt input */}
                 <input
                   type="text"
                   value={audioPrompt}
                   onChange={e => setAudioPrompt(e.target.value)}
-                  disabled={mmAudioState.status === 'running'}
-                  placeholder="Describe the sound (optional) — e.g. cinematic orchestral score"
+                  disabled={activeAudioState.status === 'running'}
+                  placeholder={audioEngine === 'mmaudio'
+                    ? 'Sound description (optional) — e.g. cinematic orchestral score'
+                    : 'Foley description (optional) — e.g. footsteps on gravel, distant thunder'}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500 disabled:opacity-50"
                 />
 
-                {/* Status / controls */}
-                {mmAudioState.status === 'idle' || mmAudioState.status === 'cancelled' ? (
+                {/* Status / action */}
+                {activeAudioState.status === 'idle' || activeAudioState.status === 'cancelled' ? (
                   <button
-                    onClick={() => mmAudioGenerate(videoPath, audioPrompt, 8)}
+                    onClick={() => {
+                      if (audioEngine === 'mmaudio') mmAudioGenerate(videoPath, audioPrompt, 8)
+                      else prismAudioGenerate(videoPath, audioPrompt)
+                    }}
                     className="w-full py-1.5 rounded text-xs font-semibold bg-violet-700 hover:bg-violet-600 text-white transition-colors"
                   >
                     Generate Audio
                   </button>
-                ) : mmAudioState.status === 'running' ? (
+                ) : activeAudioState.status === 'running' ? (
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs text-zinc-400">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" />
-                      <span>Generating audio…</span>
+                      <span>Generating…</span>
                     </div>
                     <button
-                      onClick={mmAudioCancel}
+                      onClick={() => audioEngine === 'mmaudio' ? mmAudioCancel() : prismAudioCancel()}
                       className="text-xs text-red-400 hover:text-red-300"
                     >
                       Cancel
                     </button>
                   </div>
-                ) : mmAudioState.status === 'complete' ? (
+                ) : activeAudioState.status === 'complete' ? (
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs text-emerald-400">
                       <Check className="h-3.5 w-3.5" />
-                      <span>Audio added! Video updated.</span>
+                      <span>Audio added — video updated.</span>
                     </div>
                     <button
-                      onClick={() => { mmAudioReset(); setAudioPrompt('') }}
+                      onClick={() => {
+                        if (audioEngine === 'mmaudio') mmAudioReset()
+                        else prismAudioReset()
+                        setAudioPrompt('')
+                      }}
                       className="text-xs text-zinc-400 hover:text-white"
                     >
                       Regenerate
@@ -617,9 +671,12 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    <p className="text-xs text-red-400">{mmAudioState.error || 'Generation failed'}</p>
+                    <p className="text-xs text-red-400">{activeAudioState.error || 'Generation failed'}</p>
                     <button
-                      onClick={() => mmAudioGenerate(videoPath, audioPrompt, 8)}
+                      onClick={() => {
+                        if (audioEngine === 'mmaudio') mmAudioGenerate(videoPath, audioPrompt, 8)
+                        else prismAudioGenerate(videoPath, audioPrompt)
+                      }}
                       className="w-full py-1.5 rounded text-xs font-semibold bg-violet-700 hover:bg-violet-600 text-white transition-colors"
                     >
                       Retry
@@ -627,15 +684,11 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
                   </div>
                 )}
 
-                {mmAudioState.logTail && mmAudioState.status === 'running' && (
+                {activeAudioState.logTail && activeAudioState.status === 'running' && (
                   <div className="bg-black/50 rounded px-2 py-1.5 max-h-16 overflow-y-auto">
-                    <pre className="text-[10px] text-zinc-500 whitespace-pre-wrap">{mmAudioState.logTail.split('\n').slice(-4).join('\n')}</pre>
+                    <pre className="text-[10px] text-zinc-500 whitespace-pre-wrap">{activeAudioState.logTail.split('\n').slice(-4).join('\n')}</pre>
                   </div>
                 )}
-
-                <p className="text-[10px] text-zinc-600">
-                  Requires MMAudio installed in WSL (~1.5 GB, auto-downloads weights on first run).
-                </p>
               </div>
             )}
           </div>

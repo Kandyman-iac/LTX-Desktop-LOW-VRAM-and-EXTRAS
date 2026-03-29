@@ -362,3 +362,21 @@ class MMAudioProgressResponse(BaseModel):
     output_path: str | None = None
     error: str | None = None
     log_tail: str = ""
+
+
+# ============================================================
+# PrismAudio request / response types
+# ============================================================
+
+
+class PrismAudioGenerateRequest(BaseModel):
+    video_path: str           # Windows filesystem path to input video
+    prompt: str = ""          # Optional Foley/SFX description
+    seed: int | None = None
+
+
+class PrismAudioProgressResponse(BaseModel):
+    status: str               # idle | running | complete | error | cancelled
+    output_path: str | None = None
+    error: str | None = None
+    log_tail: str = ""
