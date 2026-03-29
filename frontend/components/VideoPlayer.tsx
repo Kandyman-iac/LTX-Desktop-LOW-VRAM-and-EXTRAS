@@ -1,15 +1,17 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
-import { Play, Pause, Download, RefreshCw, RotateCcw, Volume2, VolumeX, Maximize2 } from 'lucide-react'
+import { Play, Pause, Download, RefreshCw, RotateCcw, Volume2, VolumeX, Maximize2, Music, X, Loader2, Check } from 'lucide-react'
 import { Button } from './ui/button'
 import { logger } from '../lib/logger'
+import { useMMAudio } from '../hooks/use-mmaudio'
 
 interface VideoPlayerProps {
   videoUrl: string | null
-  videoPath?: string | null  // Local file path for upscaling
+  videoPath?: string | null  // Local file path for upscaling / audio generation
   videoResolution?: string   // Resolution of the video (540p, 720p, 1080p)
   isGenerating: boolean
   progress: number
   statusMessage: string
+  onAudioReady?: (url: string, path: string) => void
 }
 
 function formatTime(seconds: number): string {
@@ -18,7 +20,7 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating, progress, statusMessage }: VideoPlayerProps) {
+export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating, progress, statusMessage, onAudioReady }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const progressRef = useRef<HTMLDivElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -37,7 +39,29 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
   const [isDraggingCurtain, setIsDraggingCurtain] = useState(false)
   const upscaledVideoRef = useRef<HTMLVideoElement>(null)
   const curtainContainerRef = useRef<HTMLDivElement>(null)
-  
+
+  // MMAudio state
+  const { state: mmAudioState, generate: mmAudioGenerate, cancel: mmAudioCancel, reset: mmAudioReset } = useMMAudio()
+  const [showAudioPanel, setShowAudioPanel] = useState(false)
+  const [audioPrompt, setAudioPrompt] = useState('')
+  const prevVideoPathRef2 = useRef<string | null>(null)
+
+  // Notify parent when MMAudio completes
+  useEffect(() => {
+    if (mmAudioState.status === 'complete' && mmAudioState.outputPath && mmAudioState.outputUrl) {
+      onAudioReady?.(mmAudioState.outputUrl, mmAudioState.outputPath)
+    }
+  }, [mmAudioState.status, mmAudioState.outputPath, mmAudioState.outputUrl, onAudioReady])
+
+  // Reset audio panel when the source video changes
+  useEffect(() => {
+    if (videoPath !== prevVideoPathRef2.current) {
+      prevVideoPathRef2.current = videoPath ?? null
+      mmAudioReset()
+      setShowAudioPanel(false)
+    }
+  }, [videoPath, mmAudioReset])
+
   // Calculate upscale target resolution first (needed for displayedResolution)
   const upscaleTargetResolution = videoResolution === '540p' ? '1080p' : videoResolution === '720p' ? '1440p' : '2160p'
   
@@ -516,10 +540,104 @@ export function VideoPlayer({ videoUrl, videoPath, videoResolution, isGenerating
                   >
                     <Download className="h-4 w-4" />
                   </Button>
+
+                  {/* Add Audio (MMAudio) */}
+                  {videoPath && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setShowAudioPanel(v => !v)}
+                      className={`h-8 w-8 hover:bg-zinc-800 ${showAudioPanel || mmAudioState.status === 'complete' ? 'text-violet-400' : 'text-zinc-400 hover:text-white'}`}
+                      title="Add AI Audio (MMAudio)"
+                    >
+                      <Music className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
-              
+
             </div>
+
+            {/* MMAudio inline panel */}
+            {showAudioPanel && videoPath && (
+              <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Add AI Audio</span>
+                  <button
+                    onClick={() => { setShowAudioPanel(false); if (mmAudioState.status !== 'running') mmAudioReset() }}
+                    className="text-zinc-500 hover:text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* Prompt input */}
+                <input
+                  type="text"
+                  value={audioPrompt}
+                  onChange={e => setAudioPrompt(e.target.value)}
+                  disabled={mmAudioState.status === 'running'}
+                  placeholder="Describe the sound (optional) — e.g. cinematic orchestral score"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                />
+
+                {/* Status / controls */}
+                {mmAudioState.status === 'idle' || mmAudioState.status === 'cancelled' ? (
+                  <button
+                    onClick={() => mmAudioGenerate(videoPath, audioPrompt, 8)}
+                    className="w-full py-1.5 rounded text-xs font-semibold bg-violet-700 hover:bg-violet-600 text-white transition-colors"
+                  >
+                    Generate Audio
+                  </button>
+                ) : mmAudioState.status === 'running' ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs text-zinc-400">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" />
+                      <span>Generating audio…</span>
+                    </div>
+                    <button
+                      onClick={mmAudioCancel}
+                      className="text-xs text-red-400 hover:text-red-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : mmAudioState.status === 'complete' ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs text-emerald-400">
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Audio added! Video updated.</span>
+                    </div>
+                    <button
+                      onClick={() => { mmAudioReset(); setAudioPrompt('') }}
+                      className="text-xs text-zinc-400 hover:text-white"
+                    >
+                      Regenerate
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-red-400">{mmAudioState.error || 'Generation failed'}</p>
+                    <button
+                      onClick={() => mmAudioGenerate(videoPath, audioPrompt, 8)}
+                      className="w-full py-1.5 rounded text-xs font-semibold bg-violet-700 hover:bg-violet-600 text-white transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {mmAudioState.logTail && mmAudioState.status === 'running' && (
+                  <div className="bg-black/50 rounded px-2 py-1.5 max-h-16 overflow-y-auto">
+                    <pre className="text-[10px] text-zinc-500 whitespace-pre-wrap">{mmAudioState.logTail.split('\n').slice(-4).join('\n')}</pre>
+                  </div>
+                )}
+
+                <p className="text-[10px] text-zinc-600">
+                  Requires MMAudio installed in WSL (~1.5 GB, auto-downloads weights on first run).
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center text-zinc-500">

@@ -180,6 +180,18 @@ export function Playground() {
     },
   })
 
+  // Audio override — set when MMAudio completes; cleared on new generation
+  const [audioVideoUrl, setAudioVideoUrl] = useState<string | null>(null)
+  const [audioVideoPath, setAudioVideoPath] = useState<string | null>(null)
+  useEffect(() => { setAudioVideoUrl(null); setAudioVideoPath(null) }, [videoUrl])
+  const handleAudioReady = (url: string, path: string) => {
+    setAudioVideoUrl(url)
+    setAudioVideoPath(path)
+  }
+
+  const effectiveVideoUrl = audioVideoUrl ?? videoUrl
+  const effectiveVideoPath = audioVideoPath ?? videoPath
+
   // Sync editableEnhancedPrompt whenever a new enhanced prompt arrives from generation.
   useEffect(() => {
     if (enhancedPrompt !== null) {
@@ -392,7 +404,7 @@ export function Playground() {
     setIcLoraPanelKey((prev) => prev + 1)
     setIcLoraCondType('canny')
     setIcLoraStrength(1.0)
-    setMagiInput({ imagePath: null, seconds: 5, width: 448, height: 256, gpus: 2, seed: undefined, ready: false })
+    setMagiInput({ imagePath: null, seconds: 5, width: 448, height: 256, gpus: 2, seed: undefined, sr: false, ready: false })
     resetRetake()
     resetIcLora()
     resetMagi()
@@ -993,12 +1005,13 @@ export function Playground() {
             />
           ) : (
             <VideoPlayer
-              videoUrl={videoUrl}
-              videoPath={videoPath}
+              videoUrl={effectiveVideoUrl}
+              videoPath={effectiveVideoPath}
               videoResolution={settings.videoResolution}
               isGenerating={isGenerating}
               progress={progress}
               statusMessage={statusMessage}
+              onAudioReady={handleAudioReady}
             />
           )}
           </div>

@@ -34,7 +34,7 @@ function FlushVramButton() {
       setFreedMb(data.freed_mb)
       setStatus('done')
     } catch (err) {
-      logger.error('VRAM flush failed', err)
+      logger.error(`VRAM flush failed: ${String(err)}`)
       setStatus('error')
     } finally {
       setTimeout(() => setStatus('idle'), 3000)

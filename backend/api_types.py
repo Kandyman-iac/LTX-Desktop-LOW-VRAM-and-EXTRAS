@@ -343,3 +343,22 @@ class MagiProgressResponse(BaseModel):
 
 class MagiGenerateResponse(BaseModel):
     status: str
+
+
+# ============================================================
+# MMAudio request / response types
+# ============================================================
+
+
+class MMAudioGenerateRequest(BaseModel):
+    video_path: str           # Windows filesystem path to input video
+    prompt: str = ""          # Optional audio description; defaults to ambient inference
+    duration: float = 8.0    # Audio duration in seconds (match video length for best results)
+    seed: int | None = None
+
+
+class MMAudioProgressResponse(BaseModel):
+    status: str               # idle | running | complete | error | cancelled
+    output_path: str | None = None
+    error: str | None = None
+    log_tail: str = ""

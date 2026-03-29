@@ -88,7 +88,7 @@ export function useMagi() {
   const submitMagi = useCallback(async (params: MagiSubmitParams) => {
     if (!params.imagePath || !params.prompt.trim()) return
 
-    setState({ isGenerating: true, status: 'Starting…', error: null, result: null, logTail: '' })
+    setState(s => ({ ...s, isGenerating: true, status: 'Starting…', error: null, result: null, logTail: '' }))
 
     try {
       const res = await backendFetch('/api/magi/generate', {
@@ -107,14 +107,14 @@ export function useMagi() {
       })
       const data = await res.json()
       if (!res.ok) {
-        setState({ isGenerating: false, status: '', error: (data as { error?: string }).error ?? 'Failed to start', result: null, logTail: '' })
+        setState(s => ({ ...s, isGenerating: false, status: '', error: (data as { error?: string }).error ?? 'Failed to start', result: null, logTail: '' }))
         return
       }
       setState(s => ({ ...s, status: 'Generating… (model load ~2 min first run)' }))
       // Poll every 3 seconds
       pollRef.current = setInterval(pollProgress, 3000)
     } catch (err) {
-      setState({ isGenerating: false, status: '', error: (err as Error).message, result: null, logTail: '' })
+      setState(s => ({ ...s, isGenerating: false, status: '', error: (err as Error).message, result: null, logTail: '' }))
     }
   }, [pollProgress])
 

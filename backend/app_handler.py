@@ -15,6 +15,7 @@ from handlers import (
     IcLoraHandler,
     ImageGenerationHandler,
     MagiHandler,
+    MMAudioHandler,
     ModelsHandler,
     PipelinesHandler,
     QueueHandler,
@@ -237,6 +238,7 @@ class AppHandler:
         )
 
         self.magi = MagiHandler(outputs_dir=config.outputs_dir)
+        self.mmaudio = MMAudioHandler(outputs_dir=config.outputs_dir)
 
         self.downloads.cleanup_downloading_dir()
         self.models.refresh_available_files()
