@@ -375,7 +375,7 @@ function AppContent() {
         <div className="h-screen bg-background flex items-center justify-center">
           <div className="text-center">
             <Loader2 className="h-12 w-12 text-primary animate-spin mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-foreground mb-2">Starting LTX Desktop...</h2>
+            <h2 className="text-xl font-semibold text-foreground mb-2">Starting RADICAL LTX Desktop...</h2>
             <p className="text-muted-foreground">Initializing the inference engine</p>
           </div>
         </div>

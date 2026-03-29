@@ -1,5 +1,5 @@
 appId: com.lightricks.ltx-desktop
-productName: LTX Desktop
+productName: RADICAL LTX Desktop
 copyright: Copyright © 2026 Lightricks
 
 directories:
@@ -55,7 +55,7 @@ nsis:
   installerHeaderIcon: resources/icon.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: LTX Desktop
+  shortcutName: RADICAL LTX Desktop
 
 mac:
   hardenedRuntime: true

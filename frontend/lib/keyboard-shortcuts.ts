@@ -363,7 +363,7 @@ export const BUILT_IN_PRESETS: KeyboardPreset[] = [
   {
     id: 'ltx-default',
     name: 'LTX Default',
-    description: 'Default keyboard layout for LTX Desktop',
+    description: 'Default keyboard layout for RADICAL LTX Desktop',
     layout: LTX_DEFAULT_LAYOUT,
     builtIn: true,
   },

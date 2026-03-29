@@ -38,7 +38,7 @@ export function Project() {
             <ArrowLeft className="h-5 w-5 text-zinc-400" />
           </button>
           
-          <LtxLogo className="h-5 w-auto text-white" />
+          <LtxLogo className="text-xl text-white" />
           
           {/* Project name */}
           <span className="text-white font-medium">{currentProject.name}</span>

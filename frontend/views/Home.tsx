@@ -138,7 +138,7 @@ export function Home() {
       {/* Sidebar */}
       <aside className="w-64 border-r border-zinc-800 flex flex-col">
         <div className="p-6">
-          <LtxLogo className="h-6 w-auto text-white" />
+          <LtxLogo className="text-2xl text-white" />
         </div>
         
         <nav className="flex-1 px-3">
@@ -205,7 +205,10 @@ export function Home() {
           {/* Dark overlay for text readability */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-black/10" />
           <div className="absolute bottom-6 left-8 z-10">
-            <h1 className="text-3xl font-bold text-white mb-2 drop-shadow-lg">LTX Desktop</h1>
+            <h1 className="text-3xl font-black drop-shadow-lg leading-tight">
+              <span className="italic text-orange-400">RADICAL</span>
+              <span className="text-white"> LTX Desktop</span>
+            </h1>
             <p className="text-zinc-200 drop-shadow-md">Create and manage your video projects</p>
           </div>
         </div>
