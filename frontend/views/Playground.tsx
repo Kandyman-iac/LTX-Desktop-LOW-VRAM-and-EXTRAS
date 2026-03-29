@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film, CheckCircle, Cpu, AlertCircle, Wand2 } from 'lucide-react'
+import { Sparkles, Trash2, Square, ImageIcon, ArrowLeft, Scissors, History, X, Film, CheckCircle, Cpu, AlertCircle, Wand2, Music } from 'lucide-react'
 import { logger } from '../lib/logger'
 import { MultiFrameConditioningPanel, type ConditioningFrame } from '../components/MultiFrameConditioningPanel'
 import { AudioUploader } from '../components/AudioUploader'
@@ -23,7 +23,10 @@ import { sanitizeForcedApiVideoSettings } from '../lib/api-video-options'
 import { RetakePanel } from '../components/RetakePanel'
 import { ICLoraPanel, CONDITIONING_TYPES, type ICLoraConditioningType } from '../components/ICLoraPanel'
 import { MagiPanel, type MagiPanelState } from '../components/MagiPanel'
+import { AddAudioPanel, type AddAudioPanelState } from '../components/AddAudioPanel'
 import { InferencePanel, type InferenceOverrides } from '../components/InferencePanel'
+import { useMMAudio } from '../hooks/use-mmaudio'
+import { usePrismAudio } from '../hooks/use-prismaudio'
 import { useGenerationHistory, type HistoryEntry } from '../hooks/use-generation-history'
 import { useEncodePrompt } from '../hooks/use-encode-prompt'
 import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
@@ -148,6 +151,7 @@ export function Playground() {
 
   // Handle mode change
   const handleModeChange = (newMode: GenerationMode) => {
+    if (newMode !== 'add-audio') { mmAudioReset(); prismAudioReset() }
     setMode(newMode)
   }
   const {
@@ -285,6 +289,17 @@ export function Playground() {
     ready: false,
   })
 
+  // Add Audio mode
+  const { state: mmAudioState, generate: mmAudioGenerate, cancel: mmAudioCancel, reset: mmAudioReset } = useMMAudio()
+  const { state: prismAudioState, generate: prismAudioGenerate, cancel: prismAudioCancel, reset: prismAudioReset } = usePrismAudio()
+  const [addAudioInput, setAddAudioInput] = useState<AddAudioPanelState>({
+    videoPath: null, videoUrl: null, engine: 'mmaudio', prompt: '', ready: false,
+  })
+  const addAudioState = addAudioInput.engine === 'mmaudio' ? mmAudioState : prismAudioState
+  const addAudioResult = addAudioState.status === 'complete' && addAudioState.outputUrl && addAudioState.outputPath
+    ? { videoUrl: addAudioState.outputUrl, videoPath: addAudioState.outputPath }
+    : null
+
   // Ref to store generated image URL for "Create video" flow
   const generatedImageRef = useRef<string | null>(null)
 
@@ -301,6 +316,16 @@ export function Playground() {
         seed: magiInput.seed,
         sr: magiInput.sr,
       })
+      return
+    }
+
+    if (mode === 'add-audio') {
+      if (!addAudioInput.videoPath) return
+      if (addAudioInput.engine === 'mmaudio') {
+        void mmAudioGenerate(addAudioInput.videoPath, addAudioInput.prompt, 8)
+      } else {
+        void prismAudioGenerate(addAudioInput.videoPath, addAudioInput.prompt)
+      }
       return
     }
 
@@ -424,16 +449,20 @@ export function Playground() {
   const isRetakeMode = mode === 'retake'
   const isIcLoraMode = mode === 'ic-lora'
   const isMagiMode = mode === 'magi-human'
+  const isAddAudioMode = mode === 'add-audio'
   const isVideoMode = mode === 'text-to-video' || mode === 'image-to-video'
-  const isBusy = isRetakeMode ? isRetaking : isIcLoraMode ? isIcLoraGenerating : isMagiMode ? isMagiGenerating : isGenerating
-  const canGenerate = (isMagiMode || processStatus === 'alive') && !isBusy && (
+  const isAddAudioBusy = addAudioState.status === 'running'
+  const isBusy = isRetakeMode ? isRetaking : isIcLoraMode ? isIcLoraGenerating : isMagiMode ? isMagiGenerating : isAddAudioMode ? isAddAudioBusy : isGenerating
+  const canGenerate = (isMagiMode || isAddAudioMode || processStatus === 'alive') && !isBusy && (
     isRetakeMode
       ? retakeInput.ready && !!retakeInput.videoPath
       : isIcLoraMode
         ? icLoraInput.ready && !!icLoraInput.videoPath && !!prompt.trim()
         : isMagiMode
           ? magiInput.ready && !!magiInput.imagePath && !!prompt.trim()
-          : !!prompt.trim()
+          : isAddAudioMode
+            ? addAudioInput.ready
+            : !!prompt.trim()
   )
 
   return (
@@ -521,6 +550,14 @@ export function Playground() {
               />
             )}
 
+            {isAddAudioMode && (
+              <AddAudioPanel
+                isProcessing={isAddAudioBusy}
+                audioState={addAudioState}
+                onChange={setAddAudioInput}
+              />
+            )}
+
             {isIcLoraMode && (
               <>
                 <ICLoraPanel
@@ -569,8 +606,8 @@ export function Playground() {
               </>
             )}
 
-            {/* Prompt Input */}
-            <div className="w-full">
+            {/* Prompt Input — hidden in Add Audio mode (panel has its own prompt field) */}
+            <div className="w-full" style={{ display: isAddAudioMode ? 'none' : undefined }}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[12px] font-semibold text-zinc-500 uppercase leading-4">Prompt</span>
                 <button
@@ -846,7 +883,7 @@ export function Playground() {
             )}
 
             {/* Settings */}
-            {!isRetakeMode && !isIcLoraMode && !isMagiMode && (
+            {!isRetakeMode && !isIcLoraMode && !isMagiMode && !isAddAudioMode && (
               <SettingsPanel
                 settings={settings}
                 onSettingsChange={setSettings}
@@ -892,7 +929,7 @@ export function Playground() {
                 Clear all
               </Button>
 
-              {!isRetakeMode && !isIcLoraMode && !isMagiMode && mode !== 'text-to-image' && (
+              {!isRetakeMode && !isIcLoraMode && !isMagiMode && !isAddAudioMode && mode !== 'text-to-image' && (
                 <Button
                   variant="outline"
                   onClick={handleAddToQueue}
@@ -909,7 +946,15 @@ export function Playground() {
                 </Button>
               )}
 
-              {isMagiGenerating ? (
+              {isAddAudioBusy ? (
+                <Button
+                  onClick={() => addAudioInput.engine === 'mmaudio' ? mmAudioCancel() : prismAudioCancel()}
+                  className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white"
+                >
+                  <Square className="h-4 w-4" />
+                  Stop Audio
+                </Button>
+              ) : isMagiGenerating ? (
                 <Button
                   onClick={cancelMagi}
                   className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white"
@@ -931,7 +976,12 @@ export function Playground() {
                   disabled={!canGenerate}
                   className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white disabled:bg-zinc-700 disabled:text-zinc-500"
                 >
-                  {isMagiMode ? (
+                  {isAddAudioMode ? (
+                    <>
+                      <Music className="h-4 w-4" />
+                      {addAudioState.status === 'complete' ? 'Regenerate Audio' : 'Generate Audio'}
+                    </>
+                  ) : isMagiMode ? (
                     <>
                       <Sparkles className="h-4 w-4" />
                       {isMagiGenerating ? 'Generating...' : 'Generate MagiHuman'}
@@ -968,7 +1018,16 @@ export function Playground() {
         {/* Right Panel - Result Preview + Inference Overrides */}
         <div className="flex-1 flex gap-4 p-6 min-w-0">
           <div className="flex-1 min-w-0">
-          {mode === 'magi-human' ? (
+          {mode === 'add-audio' ? (
+            <VideoPlayer
+              videoUrl={addAudioResult?.videoUrl ?? addAudioInput.videoUrl ?? null}
+              videoPath={addAudioResult?.videoPath ?? null}
+              videoResolution={settings.videoResolution}
+              isGenerating={isAddAudioBusy}
+              progress={0}
+              statusMessage={isAddAudioBusy ? 'Generating audio…' : addAudioState.status === 'complete' ? 'Audio complete!' : ''}
+            />
+          ) : mode === 'magi-human' ? (
             <VideoPlayer
               videoUrl={magiResult?.videoUrl || null}
               videoPath={magiResult?.videoPath || null}

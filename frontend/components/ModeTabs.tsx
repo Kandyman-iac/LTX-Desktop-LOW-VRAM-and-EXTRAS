@@ -1,10 +1,10 @@
 import { cn } from '@/lib/utils'
-import { Video, ImageIcon, Scissors, Sparkles, User } from 'lucide-react'
+import { Video, ImageIcon, Scissors, Sparkles, User, Music } from 'lucide-react'
 
-export type GenerationMode = 'text-to-video' | 'image-to-video' | 'text-to-image' | 'retake' | 'ic-lora' | 'magi-human'
+export type GenerationMode = 'text-to-video' | 'image-to-video' | 'text-to-image' | 'retake' | 'ic-lora' | 'magi-human' | 'add-audio'
 
 // Simplified tab modes shown in the UI
-type TabMode = 'video' | 'text-to-image' | 'retake' | 'ic-lora' | 'magi-human'
+type TabMode = 'video' | 'text-to-image' | 'retake' | 'ic-lora' | 'magi-human' | 'add-audio'
 
 interface ModeTabsProps {
   mode: GenerationMode
@@ -22,6 +22,7 @@ const mainTabs: { id: TabMode; label: string; genMode: GenerationMode; icon: Rea
 
 const experimentalTabs: { id: TabMode; label: string; genMode: GenerationMode; icon: React.ElementType }[] = [
   { id: 'magi-human', label: 'Magi', genMode: 'magi-human', icon: User },
+  { id: 'add-audio', label: 'Add Audio', genMode: 'add-audio', icon: Music },
 ]
 
 export function ModeTabs({ mode, onModeChange, disabled, showIcLora = true }: ModeTabsProps) {
@@ -33,7 +34,9 @@ export function ModeTabs({ mode, onModeChange, disabled, showIcLora = true }: Mo
         ? 'ic-lora'
         : mode === 'magi-human'
           ? 'magi-human'
-          : 'video'
+          : mode === 'add-audio'
+            ? 'add-audio'
+            : 'video'
   const visibleMainTabs = showIcLora ? mainTabs : mainTabs.filter((tab) => tab.id !== 'ic-lora')
 
   const renderTab = (tab: typeof mainTabs[number]) => {
