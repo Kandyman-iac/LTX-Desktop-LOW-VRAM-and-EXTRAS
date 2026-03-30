@@ -145,13 +145,15 @@ class MMAudioHandler:
 
             # Stream the output MP4 from WSL via cat → write on Windows side.
             # Avoids WSL→Windows cp failures on /mnt/c/ paths.
+            # Pipe find → xargs cat — avoids $() subshell which returns empty
+            # when called via wsl.exe bash -c from Windows Python.
             cat_result = subprocess.run(
                 ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
-                 f"f=$(ls -t '{wsl_out_dir}'/*.mp4 2>/dev/null | head -1); "
-                 f"[ -n \"$f\" ] && cat \"$f\""],
+                 f"find '{wsl_out_dir}' -maxdepth 1 -name '*.mp4' -type f"
+                 f" | head -1 | xargs -r cat"],
                 capture_output=True,
             )
-            if cat_result.returncode != 0 or not cat_result.stdout:
+            if not cat_result.stdout:
                 ls_out = subprocess.run(
                     ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
                      f"ls '{wsl_out_dir}/' 2>&1"],

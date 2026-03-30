@@ -293,10 +293,10 @@ class PrismAudioHandler:
             # Mix WAV + source video → MP4 inside WSL, then stream to Windows via cat.
             # Avoids WSL→Windows cp failures on /mnt/c/ paths.
             wsl_mixed = f"/tmp/prismaudio_mixed_{stem}.mp4"
+            # Use find|xargs to avoid $() subshell issues when called from Windows Python
             mix_bash = (
-                f"wav=$(find '{wsl_results_dir}' -name '*.wav' 2>/dev/null | head -1); "
-                f"[ -n \"$wav\" ] && "
-                f"ffmpeg -y -i '{wsl_video_path}' -i \"$wav\" "
+                f"find '{wsl_results_dir}' -name '*.wav' -type f | head -1 | "
+                f"xargs -r -I WAV ffmpeg -y -i '{wsl_video_path}' -i WAV "
                 f"-c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest '{wsl_mixed}' "
                 f"&& echo OK || echo FAILED"
             )
