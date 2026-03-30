@@ -147,6 +147,14 @@ class MMAudioHandler:
             win_out = self._outputs_dir / f"{stem}.mp4"
             win_wsl = _win_to_wsl_path(str(win_out))
 
+            # List what's in the output dir to aid debugging, then copy the mp4
+            ls_result = subprocess.run(
+                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
+                 f"ls '{wsl_out_dir}/' 2>&1"],
+                capture_output=True, text=True,
+            )
+            self._append_log(f"[copy] output dir contents: {ls_result.stdout.strip()}")
+
             copy_bash = (
                 f"f=$(ls -t '{wsl_out_dir}'/*.mp4 2>/dev/null | head -1); "
                 f"[ -n \"$f\" ] && cp \"$f\" '{win_wsl}' && echo OK || echo NOTFOUND"
@@ -157,8 +165,13 @@ class MMAudioHandler:
             )
             if "OK" not in cp.stdout:
                 with self._lock:
+                    log_snippet = "\n".join(self._job.log_lines[-10:])
                     self._job.status = "error"
-                    self._job.error = f"MMAudio output file not found. stderr: {cp.stderr.strip()}"
+                    self._job.error = (
+                        f"MMAudio output file not found. "
+                        f"Dir: {ls_result.stdout.strip() or '(empty)'}. "
+                        f"stderr: {cp.stderr.strip()}"
+                    )
                 return
 
             # Clean up WSL temp dir

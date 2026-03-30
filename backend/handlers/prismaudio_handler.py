@@ -232,7 +232,9 @@ class PrismAudioHandler:
 
         if _PRISMAUDIO_PYTHON_WSL:
             python_bin = _PRISMAUDIO_PYTHON_WSL
-            torchrun_bin = str(Path(_PRISMAUDIO_PYTHON_WSL).parent / "torchrun")
+            # Use string split — Path() on Windows produces backslashes for Linux paths
+            _wsl_bin_dir = _PRISMAUDIO_PYTHON_WSL.rsplit("/", 1)[0]
+            torchrun_bin = f"{_wsl_bin_dir}/torchrun"
         else:
             python_bin = f"conda run -n {_PRISMAUDIO_CONDA_ENV_WSL} --no-capture-output python"
             torchrun_bin = f"conda run -n {_PRISMAUDIO_CONDA_ENV_WSL} --no-capture-output torchrun"
