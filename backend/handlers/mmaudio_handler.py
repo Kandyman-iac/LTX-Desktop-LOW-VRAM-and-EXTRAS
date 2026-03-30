@@ -104,7 +104,6 @@ class MMAudioHandler:
             f" --prompt '{prompt_arg.replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))}'"
             f" --duration {duration_arg}"
             f" --output '{wsl_out_dir}'"
-            f" --prefix '{stem}'"
         )
         if req.seed is not None:
             inner_cmd += f" --seed {req.seed}"
