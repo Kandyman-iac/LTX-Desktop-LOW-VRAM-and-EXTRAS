@@ -350,16 +350,16 @@ export function InferencePanel({ overrides, defaults, onChange, disabled = false
               <div className="flex items-center justify-between">
                 <div>
                   <label className="text-xs text-zinc-300">STG Block</label>
-                  <p className="text-[10px] text-zinc-500">Block to perturb (0–27)</p>
+                  <p className="text-[10px] text-zinc-500">Block to perturb (0–47 for 22B)</p>
                 </div>
                 <input
                   type="number"
                   min={0}
-                  max={27}
+                  max={47}
                   value={overrides.stgBlockIndex}
                   disabled={disabled}
                   onChange={(e) => {
-                    const v = Math.max(0, Math.min(27, parseInt(e.target.value) || 19))
+                    const v = Math.max(0, Math.min(47, parseInt(e.target.value) || 28))
                     onChange({ ...overrides, stgBlockIndex: v })
                   }}
                   className="w-14 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"

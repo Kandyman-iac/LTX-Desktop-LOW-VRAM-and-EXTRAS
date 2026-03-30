@@ -105,9 +105,14 @@ class AppSettings(SettingsBaseModel):
     # 0.0 = disabled. Typical range 0.5–2.0. Improves prompt adherence without
     # a negative prompt — runs a second perturbed forward pass per step.
     stg_scale: float = 0.0
-    # Transformer block index to perturb for STG (0-27 for LTX-Video 28-block model).
-    # Block 19 is the community-recommended default. Does nothing when stg_scale=0.
-    stg_block_index: int = 19
+    # Transformer block index to perturb for STG (0-47 for LTX-Video 2.3 22B 48-block model).
+    # Block 28 is the community-recommended default for 22B. Does nothing when stg_scale=0.
+    stg_block_index: int = 28
+    # Sigma schedule for the distilled pipeline denoising loop.
+    # "distilled" = LTX-native compressed schedule (default).
+    # "linear"    = evenly-spaced sigmas from 1.0→0.0, community-reported to reduce
+    #               metallic audio artifacts on the native LTX audio track.
+    distilled_sigma_schedule: str = "distilled"
 
     @field_validator("block_swap_blocks_on_gpu", mode="before")
     @classmethod
@@ -149,7 +154,7 @@ class AppSettings(SettingsBaseModel):
     @field_validator("stg_block_index", mode="before")
     @classmethod
     def _clamp_stg_block_index(cls, value: Any) -> int:
-        return _clamp_int(value, minimum=0, maximum=27, default=19)
+        return _clamp_int(value, minimum=0, maximum=47, default=28)
 
 
 SettingsModelT = TypeVar("SettingsModelT", bound=SettingsBaseModel)
@@ -230,7 +235,8 @@ class SettingsResponse(SettingsBaseModel):
     distilled_num_steps: int = 8
     reload_pipeline_every_n_gens: int = 0
     stg_scale: float = 0.0
-    stg_block_index: int = 19
+    stg_block_index: int = 28
+    distilled_sigma_schedule: str = "distilled"
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:

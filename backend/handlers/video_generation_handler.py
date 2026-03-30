@@ -93,6 +93,9 @@ class VideoGenerationHandler(StateHandlerBase):
         if audio_path:
             return self._generate_a2v(req, duration, fps, audio_path=audio_path)
 
+        if req.model == "dev":
+            return self._generate_dev(req, duration, fps)
+
         logger.info("Resolution %s - using fast pipeline", resolution)
 
         RESOLUTION_MAP_16_9: dict[str, tuple[int, int]] = {
@@ -261,6 +264,7 @@ class VideoGenerationHandler(StateHandlerBase):
         total_steps = num_steps_override if num_steps_override is not None else settings.distilled_num_steps
         eff_stg_scale = stg_scale_override if stg_scale_override is not None else settings.stg_scale
         eff_stg_block_index = stg_block_index_override if stg_block_index_override is not None else settings.stg_block_index
+        sigma_schedule = settings.distilled_sigma_schedule
 
         # OOM prevention: force pipeline eviction every N completions so
         # VRAM fragmentation doesn't accumulate across generations.
@@ -312,7 +316,7 @@ class VideoGenerationHandler(StateHandlerBase):
             height = round(height / 64) * 64
             width = round(width / 64) * 64
 
-            logger.info("[%s] Inference params: steps=%d stg_scale=%.2f stg_block=%d", gen_mode, total_steps, eff_stg_scale, eff_stg_block_index)
+            logger.info("[%s] Inference params: steps=%d stg_scale=%.2f stg_block=%d sigma_schedule=%s", gen_mode, total_steps, eff_stg_scale, eff_stg_block_index, sigma_schedule)
             t_inference_start = time.perf_counter()
             pipeline_state.pipeline.generate(
                 prompt=enhanced_prompt,
@@ -326,6 +330,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 num_steps=total_steps,
                 stg_scale=eff_stg_scale,
                 stg_block_index=eff_stg_block_index,
+                sigma_schedule=sigma_schedule,
             )
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)
@@ -343,6 +348,163 @@ class VideoGenerationHandler(StateHandlerBase):
             self._completed_generation_count += 1
             self._generation.update_progress("complete", 100, total_steps, total_steps)
             return str(output_path)
+        finally:
+            self._text.clear_api_embeddings()
+            if temp_image_path and os.path.exists(temp_image_path):
+                os.unlink(temp_image_path)
+            if pre_built_images:
+                for img_input in pre_built_images:
+                    if os.path.exists(img_input.path):
+                        try:
+                            os.unlink(img_input.path)
+                        except OSError:
+                            pass
+
+    def _generate_dev(
+        self, req: GenerateVideoRequest, duration: int, fps: int
+    ) -> GenerateVideoResponse:
+        """Generate using the dev (TI2VidTwoStages) pipeline for higher quality output."""
+        resolution = req.resolution
+
+        RESOLUTION_MAP_16_9: dict[str, tuple[int, int]] = {
+            "540p": (960, 544),
+            "720p": (1280, 704),
+            "1080p": (1920, 1088),
+        }
+
+        def get_16_9_size(res: str) -> tuple[int, int]:
+            return RESOLUTION_MAP_16_9.get(res, (960, 544))
+
+        match req.aspectRatio:
+            case "9:16":
+                w, h = get_16_9_size(resolution)
+                width, height = h, w
+            case _:
+                width, height = get_16_9_size(resolution)
+
+        num_frames = self._compute_num_frames(duration, fps)
+
+        pre_built_images: list[ImageConditioningInput] | None = None
+        image = None
+        if req.conditioningImages:
+            pre_built_images = self._prepare_conditioning_images(req.conditioningImages, width, height, num_frames)
+        else:
+            image_path = normalize_optional_path(req.imagePath)
+            if image_path:
+                image = self._prepare_image(image_path, width, height)
+
+        generation_id = self._make_generation_id()
+        seed = self._resolve_seed(req.seed)
+
+        settings = self.state.app_settings
+        num_steps = req.numSteps if req.numSteps is not None else 30
+        eff_stg_scale = req.stgScale if req.stgScale is not None else settings.stg_scale
+        eff_stg_block_index = req.stgBlockIndex if req.stgBlockIndex is not None else settings.stg_block_index
+        cfg_scale = req.cfgScale if req.cfgScale is not None else 3.0
+        audio_cfg_scale = req.audioCfgScale if req.audioCfgScale is not None else 7.0
+        rescale_scale = req.rescaleScale if req.rescaleScale is not None else 0.7
+        modality_scale = req.modalityScale if req.modalityScale is not None else 3.0
+
+        try:
+            self._generation.start_generation(generation_id)
+            t_gen_start = time.perf_counter()
+
+            enhanced_prompt = (req.enhancedPrompt or req.prompt) + self.config.camera_motion_prompts.get(req.cameraMotion, "")
+            negative_prompt = req.negativePrompt
+
+            images: list[ImageConditioningInput] = []
+            temp_image_path: str | None = None
+            if pre_built_images is not None:
+                images = pre_built_images
+            elif image is not None:
+                temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+                image.save(temp_image_path)
+                images = [ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0)]
+
+            output_path = self._make_output_path()
+
+            self._generation.update_progress("loading_model", 5, 0, num_steps)
+            pipeline_state = self._pipelines.load_gpu_pipeline("dev", should_warm=False)
+
+            use_api_encoding = not self._text.should_use_local_encoding()
+            enhance = use_api_encoding and (
+                settings.prompt_enhancer_enabled_i2v if image is not None
+                else settings.prompt_enhancer_enabled_t2v
+            )
+            self._generation.update_progress("encoding_text", 10, 0, num_steps)
+            self._text.prepare_text_encoding(enhanced_prompt, enhance_prompt=enhance)
+            self._generation.update_progress("inference", 15, 0, num_steps)
+
+            height = round(height / 64) * 64
+            width = round(width / 64) * 64
+
+            logger.info(
+                "[dev] Inference: steps=%d cfg=%.2f audio_cfg=%.2f stg=%.2f stg_block=%d rescale=%.2f modality=%.2f",
+                num_steps, cfg_scale, audio_cfg_scale, eff_stg_scale, eff_stg_block_index, rescale_scale, modality_scale,
+            )
+            t_inference_start = time.perf_counter()
+            pipeline_state.pipeline.generate(
+                prompt=enhanced_prompt,
+                negative_prompt=negative_prompt,
+                seed=seed,
+                height=height,
+                width=width,
+                num_frames=num_frames,
+                frame_rate=fps,
+                images=images,
+                output_path=str(output_path),
+                num_steps=num_steps,
+                cfg_scale=cfg_scale,
+                audio_cfg_scale=audio_cfg_scale,
+                stg_scale=eff_stg_scale,
+                stg_block_index=eff_stg_block_index,
+                rescale_scale=rescale_scale,
+                modality_scale=modality_scale,
+            )
+            t_inference_end = time.perf_counter()
+            render_time = time.perf_counter() - t_gen_start
+            logger.info("[dev] Inference: %.2fs total: %.2fs", t_inference_end - t_inference_start, render_time)
+
+            if self._generation.is_generation_cancelled():
+                if output_path.exists():
+                    output_path.unlink()
+                raise RuntimeError("Generation was cancelled")
+
+            self._write_sidecar(
+                video_path=str(output_path),
+                prompt=req.prompt,
+                enhanced_prompt=req.enhancedPrompt,
+                negative_prompt=negative_prompt,
+                resolution=resolution,
+                width=width,
+                height=height,
+                num_frames=num_frames,
+                fps=fps,
+                duration=duration,
+                aspect_ratio=req.aspectRatio,
+                camera_motion=req.cameraMotion,
+                model=req.model,
+                seed=seed,
+                render_time_seconds=render_time,
+            )
+
+            self._completed_generation_count += 1
+            self._generation.update_progress("complete", 100, num_steps, num_steps)
+            self._generation.complete_generation(str(output_path))
+            return GenerateVideoResponse(status="complete", video_path=str(output_path), seed_used=seed)
+
+        except Exception as e:
+            self._generation.fail_generation(str(e))
+            if "cancelled" in str(e).lower():
+                logger.info("Generation cancelled by user")
+                return GenerateVideoResponse(status="cancelled")
+            if "out of memory" in str(e).lower():
+                logger.warning("CUDA OOM detected — unloading pipeline to recover VRAM")
+                try:
+                    self._pipelines.unload_gpu_pipeline()
+                except Exception:
+                    logger.warning("Pipeline unload after OOM failed", exc_info=True)
+            raise HTTPError(500, str(e)) from e
         finally:
             self._text.clear_api_embeddings()
             if temp_image_path and os.path.exists(temp_image_path):

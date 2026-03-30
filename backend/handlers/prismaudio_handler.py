@@ -227,7 +227,9 @@ class PrismAudioHandler:
 
     def _run_wsl(self, req: PrismAudioGenerateRequest) -> None:
         stem = f"prismaudio_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-        wsl_results_dir = f"/tmp/prismaudio_results_{stem}"
+        # Feature extraction writes results/demo.npz to the repo dir by default.
+        # predict.py reads from the same results/ dir — don't override with a custom path.
+        wsl_repo_results = f"{_PRISMAUDIO_DIR_WSL}/results"
         wsl_video_path = _win_to_wsl_path(req.video_path)
 
         if _PRISMAUDIO_PYTHON_WSL:
@@ -243,11 +245,12 @@ class PrismAudioHandler:
         safe_prompt = req.prompt.replace("'", "'\\''")
         seed_arg = f" --seed {req.seed}" if req.seed is not None else ""
 
-        # Replicate demo.sh steps with a custom results dir (avoids date-based collisions)
+        # Replicate demo.sh steps. Feature extraction writes results/demo.npz to the repo dir;
+        # predict.py reads from the same results/ dir — both must share the repo's default path.
         inner = (
             f"set -e\n"
             f"cd '{_PRISMAUDIO_DIR_WSL}'\n"
-            f"mkdir -p videos cot_coarse '{wsl_results_dir}'\n"
+            f"mkdir -p videos cot_coarse results\n"
             f"cp '{wsl_video_path}' videos/demo.mp4\n"
             f"DURATION=$(ffprobe -v error -show_entries format=duration"
             f" -of default=noprint_wrappers=1:nokey=1 videos/demo.mp4 2>/dev/null || echo 10)\n"
@@ -260,7 +263,6 @@ class PrismAudioHandler:
             f" --model-config PrismAudio/configs/model_configs/prismaudio.json"
             f" --duration-sec \"$DURATION\""
             f" --ckpt-dir ckpts/prismaudio.ckpt"
-            f" --results-dir '{wsl_results_dir}'"
             f"{seed_arg}\n"
         )
 
@@ -293,9 +295,10 @@ class PrismAudioHandler:
             # Mix WAV + source video → MP4 inside WSL, then stream to Windows via cat.
             # Avoids WSL→Windows cp failures on /mnt/c/ paths.
             wsl_mixed = f"/tmp/prismaudio_mixed_{stem}.mp4"
-            # Use find|xargs to avoid $() subshell issues when called from Windows Python
+            # Use find|xargs to avoid $() subshell issues when called from Windows Python.
+            # WAV output lands in the repo's results/ dir (predict.py default).
             mix_bash = (
-                f"find '{wsl_results_dir}' -name '*.wav' -type f | head -1 | "
+                f"find '{wsl_repo_results}' -name '*.wav' -type f | head -1 | "
                 f"xargs -r -I WAV ffmpeg -y -i '{wsl_video_path}' -i WAV "
                 f"-c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest '{wsl_mixed}' "
                 f"&& echo OK || echo FAILED"
@@ -305,10 +308,10 @@ class PrismAudioHandler:
                 capture_output=True, text=True,
             )
 
-            # Cleanup WSL temp dirs regardless of mix result
+            # Cleanup WSL repo working files regardless of mix result
             subprocess.run(
                 ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
-                 f"rm -rf '{wsl_results_dir}'"
+                 f"rm -rf '{wsl_repo_results}'"
                  f" '{_PRISMAUDIO_DIR_WSL}/videos/demo.mp4'"
                  f" '{_PRISMAUDIO_DIR_WSL}/cot_coarse/cot.csv'"],
                 capture_output=True,

@@ -281,6 +281,17 @@ class LTXFastVideoPipeline:
 
         return _stg_func
 
+    @staticmethod
+    def _make_linear_sigmas(num_steps: int) -> list[float]:
+        """Return a linearly-spaced sigma schedule from 1.0 to 0.0.
+
+        Community-reported to reduce metallic artifacts on the native LTX audio
+        track versus the default compressed distilled schedule, by distributing
+        denoising steps evenly across the full sigma range instead of clustering
+        them near σ=1.0.
+        """
+        return [1.0 - i / num_steps for i in range(num_steps + 1)]
+
     def _run_inference(
         self,
         prompt: str,
@@ -294,6 +305,7 @@ class LTXFastVideoPipeline:
         num_steps: int = 8,
         stg_scale: float = 0.0,
         stg_block_index: int = 19,
+        sigma_schedule: str = "distilled",
     ) -> tuple[torch.Tensor | Iterator[torch.Tensor], AudioOrNone]:
         from ltx_pipelines.utils.args import ImageConditioningInput as _LtxImageInput
         import ltx_pipelines.distilled as _distilled_mod
@@ -310,7 +322,9 @@ class LTXFastVideoPipeline:
         _orig_sigmas = _distilled_mod.DISTILLED_SIGMA_VALUES
         _orig_simple = _distilled_mod.simple_denoising_func
 
-        if num_steps < 8:
+        if sigma_schedule == "linear":
+            _distilled_mod.DISTILLED_SIGMA_VALUES = self._make_linear_sigmas(num_steps)  # type: ignore[attr-defined]
+        elif num_steps < 8:
             _distilled_mod.DISTILLED_SIGMA_VALUES = self._make_sigma_subset(num_steps)  # type: ignore[attr-defined]
         if stg_scale > 0.0:
             _distilled_mod.simple_denoising_func = self._make_stg_denoising_func(stg_scale, stg_block_index)  # type: ignore[attr-defined]
@@ -350,6 +364,7 @@ class LTXFastVideoPipeline:
         num_steps: int = 8,
         stg_scale: float = 0.0,
         stg_block_index: int = 19,
+        sigma_schedule: str = "distilled",
     ) -> None:
         tiling_config = default_tiling_config(
             spatial_tile_size=self._vae_spatial_tile_size,
@@ -367,6 +382,7 @@ class LTXFastVideoPipeline:
             num_steps=num_steps,
             stg_scale=stg_scale,
             stg_block_index=stg_block_index,
+            sigma_schedule=sigma_schedule,
         )
         chunks = video_chunks_number(num_frames, tiling_config)
         encode_video_output(video=video, audio=audio, fps=int(frame_rate), output_path=output_path, video_chunks_number_value=chunks)

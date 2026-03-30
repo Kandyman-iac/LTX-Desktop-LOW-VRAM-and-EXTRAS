@@ -1865,7 +1865,7 @@ export function GenSpace() {
         prompt: job.prompt,
         negativePrompt: '',
         settings: {
-          model: (job.model as 'fast' | 'pro') || 'fast',
+          model: (job.model as 'fast' | 'pro' | 'dev') || 'fast',
           duration: parseInt(job.duration) || 5,
           videoResolution: job.resolution || '720p',
           fps: parseInt(job.fps) || 24,
@@ -2134,7 +2134,7 @@ export function GenSpace() {
       generateImage(
         prompt,
         {
-          model: 'fast' as 'fast' | 'pro',
+          model: 'fast' as 'fast' | 'pro' | 'dev',
           duration: 5,
           videoResolution: settings.videoResolution,
           fps: 24,
@@ -2159,7 +2159,7 @@ export function GenSpace() {
         prompt,
         imagePath,
         {
-          model: videoSettings.model as 'fast' | 'pro',
+          model: videoSettings.model as 'fast' | 'pro' | 'dev',
           duration: videoSettings.duration,
           videoResolution: videoSettings.videoResolution,
           fps: videoSettings.fps,
@@ -2192,7 +2192,7 @@ export function GenSpace() {
       prompt,
       imagePath,
       {
-        model: videoSettings.model as 'fast' | 'pro',
+        model: videoSettings.model as 'fast' | 'pro' | 'dev',
         duration: videoSettings.duration,
         videoResolution: videoSettings.videoResolution,
         fps: videoSettings.fps,

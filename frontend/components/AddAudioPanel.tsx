@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Film, Loader2, Music, Upload, X, Check, AlertCircle } from 'lucide-react'
+import { Film, Loader2, Music, Upload, X, Check, AlertCircle, ChevronDown, ChevronRight, Shuffle } from 'lucide-react'
 import { backendFetch } from '../lib/backend'
 import type { MMAudioState } from '../hooks/use-mmaudio'
 import type { PrismAudioState } from '../hooks/use-prismaudio'
@@ -11,6 +11,10 @@ export interface AddAudioPanelState {
   videoUrl: string | null
   engine: AudioEngine
   prompt: string
+  negativePrompt: string
+  seed: number | null
+  cfgStrength: number
+  numSteps: number
   ready: boolean
 }
 
@@ -37,6 +41,11 @@ export function AddAudioPanel({ isProcessing, audioState, onChange }: AddAudioPa
   const [sourceTab, setSourceTab] = useState<'outputs' | 'upload'>('outputs')
   const [engine, setEngine] = useState<AudioEngine>('mmaudio')
   const [prompt, setPrompt] = useState('')
+  const [negativePrompt, setNegativePrompt] = useState('')
+  const [seed, setSeed] = useState<number | null>(null)
+  const [cfgStrength, setCfgStrength] = useState(4.5)
+  const [numSteps, setNumSteps] = useState(25)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const [videoPath, setVideoPath] = useState<string | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -65,12 +74,24 @@ export function AddAudioPanel({ isProcessing, audioState, onChange }: AddAudioPa
     if (sourceTab === 'outputs') fetchOutputs()
   }, [sourceTab, fetchOutputs])
 
-  function emit(overrides: Partial<{ videoPath: string | null; videoUrl: string | null; engine: AudioEngine; prompt: string }>) {
+  function emit(overrides: Partial<{
+    videoPath: string | null; videoUrl: string | null; engine: AudioEngine
+    prompt: string; negativePrompt: string; seed: number | null
+    cfgStrength: number; numSteps: number
+  }>) {
     const vp = overrides.videoPath !== undefined ? overrides.videoPath : videoPath
     const vu = overrides.videoUrl !== undefined ? overrides.videoUrl : videoUrl
-    const eng = overrides.engine ?? engine
-    const pr = overrides.prompt ?? prompt
-    onChange({ videoPath: vp, videoUrl: vu, engine: eng, prompt: pr, ready: !!vp })
+    onChange({
+      videoPath: vp,
+      videoUrl: vu,
+      engine: overrides.engine ?? engine,
+      prompt: overrides.prompt ?? prompt,
+      negativePrompt: overrides.negativePrompt ?? negativePrompt,
+      seed: overrides.seed !== undefined ? overrides.seed : seed,
+      cfgStrength: overrides.cfgStrength ?? cfgStrength,
+      numSteps: overrides.numSteps ?? numSteps,
+      ready: !!vp,
+    })
   }
 
   function selectVideo(path: string) {
@@ -262,6 +283,105 @@ export function AddAudioPanel({ isProcessing, audioState, onChange }: AddAudioPa
           className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500 resize-none disabled:opacity-50"
         />
       </div>
+
+      {/* Seed */}
+      <div>
+        <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Seed</label>
+        <div className="flex gap-1.5">
+          <input
+            type="number"
+            value={seed ?? ''}
+            onChange={e => {
+              const v = e.target.value === '' ? null : parseInt(e.target.value, 10)
+              setSeed(v)
+              emit({ seed: v })
+            }}
+            disabled={isProcessing}
+            placeholder="Random"
+            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+          />
+          <button
+            onClick={() => {
+              const v = Math.floor(Math.random() * 2 ** 32)
+              setSeed(v)
+              emit({ seed: v })
+            }}
+            disabled={isProcessing}
+            title="Randomize seed"
+            className="px-2.5 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-white hover:border-zinc-600 transition-colors disabled:opacity-50"
+          >
+            <Shuffle className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Advanced (MMAudio only) */}
+      {engine === 'mmaudio' && (
+        <div>
+          <button
+            onClick={() => setAdvancedOpen(o => !o)}
+            className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Advanced
+          </button>
+
+          {advancedOpen && (
+            <div className="mt-2 space-y-3">
+              {/* Negative prompt */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+                  Negative Prompt
+                </label>
+                <textarea
+                  value={negativePrompt}
+                  onChange={e => { setNegativePrompt(e.target.value); emit({ negativePrompt: e.target.value }) }}
+                  disabled={isProcessing}
+                  placeholder="e.g. speech, talking, dialogue, voice, vocals, singing"
+                  rows={2}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500 resize-none disabled:opacity-50"
+                />
+              </div>
+
+              {/* CFG Strength */}
+              <div>
+                <div className="flex justify-between mb-1">
+                  <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">CFG Strength</label>
+                  <span className="text-xs text-zinc-400">{cfgStrength.toFixed(1)}</span>
+                </div>
+                <input
+                  type="range" min={1} max={10} step={0.5}
+                  value={cfgStrength}
+                  onChange={e => { const v = parseFloat(e.target.value); setCfgStrength(v); emit({ cfgStrength: v }) }}
+                  disabled={isProcessing}
+                  className="w-full accent-violet-500 disabled:opacity-50"
+                />
+                <div className="flex justify-between text-[10px] text-zinc-600 mt-0.5">
+                  <span>Loose</span><span>Strict</span>
+                </div>
+              </div>
+
+              {/* Steps */}
+              <div>
+                <div className="flex justify-between mb-1">
+                  <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Steps</label>
+                  <span className="text-xs text-zinc-400">{numSteps}</span>
+                </div>
+                <input
+                  type="range" min={10} max={50} step={5}
+                  value={numSteps}
+                  onChange={e => { const v = parseInt(e.target.value, 10); setNumSteps(v); emit({ numSteps: v }) }}
+                  disabled={isProcessing}
+                  className="w-full accent-violet-500 disabled:opacity-50"
+                />
+                <div className="flex justify-between text-[10px] text-zinc-600 mt-0.5">
+                  <span>10</span><span>50</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Progress / log tail */}
       {isRunning && audioState.logTail && (

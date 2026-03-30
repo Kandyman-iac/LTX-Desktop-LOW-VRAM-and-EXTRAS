@@ -250,6 +250,11 @@ class GenerateVideoRequest(BaseModel):
     numSteps: int | None = None        # per-request override for distilledNumSteps
     stgScale: float | None = None     # per-request override for stgScale
     stgBlockIndex: int | None = None  # per-request override for stgBlockIndex
+    # Dev (two-stage) pipeline overrides
+    cfgScale: float | None = None        # video CFG scale (dev pipeline, default 3.0)
+    audioCfgScale: float | None = None   # audio CFG scale (dev pipeline, default 7.0)
+    rescaleScale: float | None = None    # CFG rescale factor (dev pipeline, default 0.7)
+    modalityScale: float | None = None   # modality coupling scale (dev pipeline, default 3.0)
 
 
 class GenerateImageRequest(BaseModel):
@@ -355,6 +360,9 @@ class MMAudioGenerateRequest(BaseModel):
     prompt: str = ""          # Optional audio description; defaults to ambient inference
     duration: float = 8.0    # Audio duration in seconds (match video length for best results)
     seed: int | None = None
+    negative_prompt: str = ""
+    cfg_strength: float = 4.5
+    num_steps: int = 25
 
 
 class MMAudioProgressResponse(BaseModel):

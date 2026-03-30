@@ -15,6 +15,7 @@ from services.fp8_export_service import fp8_transformer_path
 from services.interfaces import (
     A2VPipeline,
     DepthProcessorPipeline,
+    DevVideoPipeline,
     FastVideoPipeline,
     ImageGenerationPipeline,
     GpuCleaner,
@@ -134,17 +135,8 @@ class PipelinesHandler(StateHandlerBase):
             logger.warning("Failed to compile transformer: %s", exc, exc_info=True)
         return state
 
-    def _create_video_pipeline(self, model_type: VideoPipelineModelType) -> VideoPipelineState:
-        gemma_root = self._text_handler.resolve_gemma_root()
-
-        checkpoint_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "checkpoint"))
-        upsampler_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "upsampler"))
-
-        settings = self.state.app_settings
-
-        # Resolve transformer device — use per-setting override if set,
-        # otherwise fall back to RuntimeConfig.transformer_device.
-        # Multi-GPU: only split if explicitly enabled AND 2+ GPUs present.
+    def _resolve_transformer_device(self, settings) -> torch.device:
+        """Resolve effective transformer device from settings."""
         transformer_device = self.config.device
         if settings.use_multi_gpu:
             if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
@@ -157,14 +149,9 @@ class PipelinesHandler(StateHandlerBase):
                 transformer_device = torch.device(settings.transformer_device)
             except Exception:
                 pass
-        # Use pre-quantized FP8 file if it exists (avoids on-the-fly downcast on every load).
-        fp8_pre_quantized = ""
-        _fp8_path = fp8_transformer_path(self.models_dir)
-        if _fp8_path.exists():
-            fp8_pre_quantized = str(_fp8_path)
-            logger.info("Pre-quantized FP8 transformer found: %s", fp8_pre_quantized)
+        return transformer_device
 
-        # Parse LoRA entries from settings JSON.
+    def _parse_lora_entries(self, settings) -> "list":
         from services.lora_service import LoraEntry
         lora_entries: list[LoraEntry] = []
         if settings.civitai_loras:
@@ -177,8 +164,62 @@ class PipelinesHandler(StateHandlerBase):
                 ]
             except Exception:
                 logger.warning("Failed to parse civitai_loras setting — no LoRAs applied")
+        return lora_entries
 
-        pipeline = self._fast_video_pipeline_class.create(
+    def _create_video_pipeline(self, model_type: VideoPipelineModelType) -> VideoPipelineState:
+        gemma_root = self._text_handler.resolve_gemma_root()
+
+        checkpoint_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "checkpoint"))
+        upsampler_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "upsampler"))
+
+        settings = self.state.app_settings
+        transformer_device = self._resolve_transformer_device(settings)
+        lora_entries = self._parse_lora_entries(settings)
+
+        if model_type == "dev":
+            pipeline = self._create_dev_pipeline(
+                checkpoint_path=checkpoint_path,
+                upsampler_path=upsampler_path,
+                gemma_root=gemma_root,
+                settings=settings,
+                transformer_device=transformer_device,
+                lora_entries=lora_entries,
+            )
+        else:
+            pipeline = self._create_fast_pipeline(
+                checkpoint_path=checkpoint_path,
+                upsampler_path=upsampler_path,
+                gemma_root=gemma_root,
+                settings=settings,
+                transformer_device=transformer_device,
+                lora_entries=lora_entries,
+            )
+
+        state = VideoPipelineState(
+            pipeline=pipeline,
+            warmth=VideoPipelineWarmth.COLD,
+            is_compiled=False,
+            config_key=self._pipeline_config_key(model_type),
+        )
+        return self._compile_if_enabled(state)
+
+    def _create_fast_pipeline(
+        self,
+        checkpoint_path: str,
+        upsampler_path: str,
+        gemma_root: str | None,
+        settings,
+        transformer_device: torch.device,
+        lora_entries: list,
+    ):
+        # Use pre-quantized FP8 file if it exists (avoids on-the-fly downcast on every load).
+        fp8_pre_quantized = ""
+        _fp8_path = fp8_transformer_path(self.models_dir)
+        if _fp8_path.exists():
+            fp8_pre_quantized = str(_fp8_path)
+            logger.info("Pre-quantized FP8 transformer found: %s", fp8_pre_quantized)
+
+        return self._fast_video_pipeline_class.create(
             checkpoint_path,
             gemma_root,
             upsampler_path,
@@ -194,13 +235,42 @@ class PipelinesHandler(StateHandlerBase):
             loras=lora_entries or None,
         )
 
-        state = VideoPipelineState(
-            pipeline=pipeline,
-            warmth=VideoPipelineWarmth.COLD,
-            is_compiled=False,
-            config_key=self._pipeline_config_key(model_type),
+    def _create_dev_pipeline(
+        self,
+        checkpoint_path: str,
+        upsampler_path: str,
+        gemma_root: str | None,
+        settings,
+        transformer_device: torch.device,
+        lora_entries: list,
+    ):
+        from services.dev_video_pipeline.ltx_dev_video_pipeline import LTXDevVideoPipeline
+
+        distilled_lora_path = resolve_model_path(
+            self.models_dir, self.config.model_download_specs, "distilled_lora"
         )
-        return self._compile_if_enabled(state)
+        if not distilled_lora_path.exists():
+            raise RuntimeError(
+                f"Dev pipeline requires the distilled LoRA weight "
+                f"({distilled_lora_path.name}). "
+                f"Please download it via the Model Status menu."
+            )
+
+        logger.info("Creating dev (two-stage) pipeline from checkpoint: %s", checkpoint_path)
+        return LTXDevVideoPipeline.create(
+            checkpoint_path=checkpoint_path,
+            distilled_lora_path=str(distilled_lora_path),
+            gemma_root=gemma_root,
+            upsampler_path=upsampler_path,
+            device=self.config.device,
+            transformer_device=transformer_device,
+            block_swap_blocks_on_gpu=settings.block_swap_blocks_on_gpu,
+            attention_tile_size=settings.attention_tile_size,
+            use_fp8_transformer=settings.use_fp8_transformer,
+            vae_spatial_tile_size=settings.vae_spatial_tile_size,
+            vae_temporal_tile_size=settings.vae_temporal_tile_size,
+            loras=lora_entries or None,
+        )
 
     def unload_gpu_pipeline(self) -> None:
         with self._lock:

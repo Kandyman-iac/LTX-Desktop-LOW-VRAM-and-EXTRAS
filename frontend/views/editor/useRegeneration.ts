@@ -277,7 +277,7 @@ export function useRegeneration(params: UseRegenerationParams) {
 
     if (params.mode === 'text-to-image') {
       regenGenerateImage(params.prompt, {
-        model: params.model as 'fast' | 'pro',
+        model: params.model as 'fast' | 'pro' | 'dev',
         duration: params.duration,
         videoResolution: '540p',
         fps: params.fps,
@@ -297,7 +297,7 @@ export function useRegeneration(params: UseRegenerationParams) {
         : null
 
       const rawVideoSettings: GenerationSettings = {
-        model: params.model as 'fast' | 'pro',
+        model: params.model as 'fast' | 'pro' | 'dev',
         duration: params.duration,
         videoResolution: params.resolution,
         fps: params.fps,

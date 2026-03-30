@@ -92,7 +92,7 @@ export function Playground() {
         prompt: job.prompt,
         negativePrompt: '',
         settings: {
-          model: (job.model as 'fast' | 'pro') || 'fast',
+          model: (job.model as 'fast' | 'pro' | 'dev') || 'fast',
           duration: parseInt(job.duration) || 5,
           videoResolution: job.resolution || '720p',
           fps: parseInt(job.fps) || 24,
@@ -293,7 +293,8 @@ export function Playground() {
   const { state: mmAudioState, generate: mmAudioGenerate, cancel: mmAudioCancel, reset: mmAudioReset } = useMMAudio()
   const { state: prismAudioState, generate: prismAudioGenerate, cancel: prismAudioCancel, reset: prismAudioReset } = usePrismAudio()
   const [addAudioInput, setAddAudioInput] = useState<AddAudioPanelState>({
-    videoPath: null, videoUrl: null, engine: 'mmaudio', prompt: '', ready: false,
+    videoPath: null, videoUrl: null, engine: 'mmaudio', prompt: '',
+    negativePrompt: '', seed: null, cfgStrength: 4.5, numSteps: 25, ready: false,
   })
   const addAudioState = addAudioInput.engine === 'mmaudio' ? mmAudioState : prismAudioState
   const addAudioResult = addAudioState.status === 'complete' && addAudioState.outputUrl && addAudioState.outputPath
@@ -322,9 +323,17 @@ export function Playground() {
     if (mode === 'add-audio') {
       if (!addAudioInput.videoPath) return
       if (addAudioInput.engine === 'mmaudio') {
-        void mmAudioGenerate(addAudioInput.videoPath, addAudioInput.prompt, 8)
+        void mmAudioGenerate(
+          addAudioInput.videoPath,
+          addAudioInput.prompt,
+          8,
+          addAudioInput.seed ?? undefined,
+          addAudioInput.negativePrompt,
+          addAudioInput.cfgStrength,
+          addAudioInput.numSteps,
+        )
       } else {
-        void prismAudioGenerate(addAudioInput.videoPath, addAudioInput.prompt)
+        void prismAudioGenerate(addAudioInput.videoPath, addAudioInput.prompt, addAudioInput.seed ?? undefined)
       }
       return
     }

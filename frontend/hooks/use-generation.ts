@@ -134,7 +134,9 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
   ) => {
     const statusMsg = settings.model === 'pro'
       ? 'Loading Pro model & generating...'
-      : 'Generating video...'
+      : settings.model === 'dev'
+        ? 'Loading Dev model & generating (high quality)...'
+        : 'Generating video...'
 
     setState({
       isGenerating: true,
@@ -198,7 +200,7 @@ export function useGeneration(options: UseGenerationOptions = {}): UseGeneration
       let lastPhase = ''
       let inferenceStartTime = 0
       // Estimated inference time in seconds based on model
-      const estimatedInferenceTime = settings.model === 'pro' ? 120 : 45
+      const estimatedInferenceTime = settings.model === 'pro' ? 120 : settings.model === 'dev' ? 180 : 45
       
       const pollProgress = async () => {
         if (!shouldApplyPollingUpdates) return

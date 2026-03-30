@@ -62,7 +62,15 @@ export function useMMAudio() {
     }
   }, [stopPolling])
 
-  const generate = useCallback(async (videoPath: string, prompt: string, duration: number, seed?: number) => {
+  const generate = useCallback(async (
+    videoPath: string,
+    prompt: string,
+    duration: number,
+    seed?: number,
+    negativePrompt?: string,
+    cfgStrength?: number,
+    numSteps?: number,
+  ) => {
     stopPolling()
     setState({ ...INITIAL, status: 'running' })
 
@@ -70,7 +78,15 @@ export function useMMAudio() {
       const res = await backendFetch('/api/mmaudio/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_path: videoPath, prompt, duration, seed: seed ?? null }),
+        body: JSON.stringify({
+          video_path: videoPath,
+          prompt,
+          duration,
+          seed: seed ?? null,
+          negative_prompt: negativePrompt ?? '',
+          cfg_strength: cfgStrength ?? 4.5,
+          num_steps: numSteps ?? 25,
+        }),
       })
       if (!res.ok) {
         const err = await res.text()

@@ -6,6 +6,7 @@ from typing import Literal
 
 from services.a2v_pipeline.a2v_pipeline import A2VPipeline
 from services.depth_processor_pipeline.depth_processor_pipeline import DepthProcessorPipeline
+from services.dev_video_pipeline.dev_video_pipeline import DevVideoPipeline
 from services.fast_video_pipeline.fast_video_pipeline import FastVideoPipeline
 from services.zit_api_client.zit_api_client import ZitAPIClient
 from services.gpu_cleaner.gpu_cleaner import GpuCleaner
@@ -22,10 +23,11 @@ from services.task_runner.task_runner import TaskRunner
 from services.text_encoder.text_encoder import TextEncoder
 from services.video_processor.video_processor import VideoInfoPayload, VideoProcessor
 
-VideoPipelineModelType = Literal["fast"]
+VideoPipelineModelType = Literal["fast", "dev"]
 
 __all__ = [
     "A2VPipeline",
+    "DevVideoPipeline",
     "JSONScalar",
     "JSONValue",
     "GpuTelemetryPayload",

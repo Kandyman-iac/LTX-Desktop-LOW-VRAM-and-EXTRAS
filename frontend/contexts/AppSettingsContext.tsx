@@ -45,6 +45,7 @@ export interface AppSettings {
   reloadPipelineEveryNGens: number
   stgScale: number
   stgBlockIndex: number
+  distilledSigmaSchedule: string
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -79,7 +80,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   distilledNumSteps: 8,
   reloadPipelineEveryNGens: 0,
   stgScale: 0,
-  stgBlockIndex: 19,
+  stgBlockIndex: 28,
+  distilledSigmaSchedule: 'distilled',
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -145,6 +147,7 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     reloadPipelineEveryNGens: data.reloadPipelineEveryNGens ?? DEFAULT_APP_SETTINGS.reloadPipelineEveryNGens,
     stgScale: data.stgScale ?? DEFAULT_APP_SETTINGS.stgScale,
     stgBlockIndex: data.stgBlockIndex ?? DEFAULT_APP_SETTINGS.stgBlockIndex,
+    distilledSigmaSchedule: data.distilledSigmaSchedule ?? DEFAULT_APP_SETTINGS.distilledSigmaSchedule,
   }
 }
 

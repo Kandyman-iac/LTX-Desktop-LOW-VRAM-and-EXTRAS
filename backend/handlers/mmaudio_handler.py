@@ -96,17 +96,23 @@ class MMAudioHandler:
         prompt_arg = req.prompt if req.prompt.strip() else "natural ambient sound"
         duration_arg = str(req.duration)
 
+        safe_prompt = prompt_arg.replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))
         inner_cmd = (
             f"mkdir -p '{wsl_out_dir}' && "
             f"cd '{_MMAUDIO_DIR}' && "
             f"{py_prefix} '{demo_script}'"
             f" --video '{wsl_video_path}'"
-            f" --prompt '{prompt_arg.replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))}'"
+            f" --prompt '{safe_prompt}'"
             f" --duration {duration_arg}"
             f" --output '{wsl_out_dir}'"
+            f" --cfg_strength {req.cfg_strength}"
+            f" --num_steps {req.num_steps}"
         )
         if req.seed is not None:
             inner_cmd += f" --seed {req.seed}"
+        if req.negative_prompt:
+            safe_neg = req.negative_prompt.replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))
+            inner_cmd += f" --negative_prompt '{safe_neg}'"
 
         cmd = ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", inner_cmd]
         logger.info("[mmaudio] Starting: video=%s prompt=%r duration=%s", req.video_path, req.prompt, req.duration)

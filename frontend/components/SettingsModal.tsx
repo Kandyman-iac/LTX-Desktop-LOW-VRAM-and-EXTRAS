@@ -1209,21 +1209,44 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm text-zinc-300">STG Block Index</label>
-                        <p className="text-xs text-zinc-500">Transformer block to perturb (0–27). Default 19 works well</p>
+                        <p className="text-xs text-zinc-500">Transformer block to perturb (0–47 for 22B). Default 28 works well</p>
                       </div>
                       <input
                         type="number"
                         min="0"
-                        max="27"
-                        value={settings.stgBlockIndex ?? 19}
+                        max="47"
+                        value={settings.stgBlockIndex ?? 28}
                         onChange={(e) => {
-                          const v = Math.max(0, Math.min(27, parseInt(e.target.value) || 19))
+                          const v = Math.max(0, Math.min(47, parseInt(e.target.value) || 28))
                           onSettingsChange({ ...settings, stgBlockIndex: v })
                         }}
                         className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
                       />
                     </div>
                   )}
+
+                  {/* Sigma Schedule */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">Sigma Schedule</label>
+                      <p className="text-xs text-zinc-500">Linear distributes steps evenly — community-reported to reduce native audio artifacts</p>
+                    </div>
+                    <div className="flex gap-1 p-0.5 bg-zinc-900 border border-zinc-700 rounded-lg">
+                      {(['distilled', 'linear'] as const).map(s => (
+                        <button
+                          key={s}
+                          onClick={() => onSettingsChange({ ...settings, distilledSigmaSchedule: s })}
+                          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                            (settings.distilledSigmaSchedule ?? 'distilled') === s
+                              ? 'bg-green-600 text-white'
+                              : 'text-zinc-400 hover:text-white'
+                          }`}
+                        >
+                          {s === 'distilled' ? 'LTX' : 'Linear'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
                   {/* Upscaler Toggle */}
                   <div className="flex items-center justify-between">
@@ -1250,7 +1273,8 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 <div className="text-xs text-zinc-500">
                   Current: {settings.distilledNumSteps ?? 8} steps
                   {(settings.stgScale ?? 0) > 0 ? `, STG ${settings.stgScale} (block ${settings.stgBlockIndex ?? 19})` : ''}
-                  {', '}{settings.fastModel?.useUpscaler !== false ? 'with upscaler (2-stage, recommended)' : 'native resolution (experimental)'}
+                  {', '}{(settings.distilledSigmaSchedule ?? 'distilled') === 'linear' ? 'linear σ' : 'LTX σ'}
+                  {', '}{settings.fastModel?.useUpscaler !== false ? 'with upscaler' : 'native resolution'}
                 </div>
               </div>
 
