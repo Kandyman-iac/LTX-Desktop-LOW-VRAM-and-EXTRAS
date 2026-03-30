@@ -23,7 +23,7 @@ _WSL_DISTRO = "Ubuntu-24.04"
 _WSL_USER = "mike_hunt"
 _MMAUDIO_DIR = "/home/mike_hunt/MMAudio"
 _MMAUDIO_CONDA_ENV = "mmaudio"   # conda env name, or set _MMAUDIO_PYTHON to a venv path
-_MMAUDIO_PYTHON: str | None = None  # e.g. "/home/mike_hunt/MMAudio/.venv/bin/python"
+_MMAUDIO_PYTHON: str | None = "/home/mike_hunt/miniconda3/envs/mmaudio/bin/python"
 _MAX_LOG_LINES = 200
 
 

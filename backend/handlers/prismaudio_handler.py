@@ -38,7 +38,7 @@ PrismAudioStatus = Literal["idle", "running", "complete", "error", "cancelled"]
 # ---------------------------------------------------------------------------
 
 # Set True to run PrismAudio inside WSL2 (Linux) instead of native Windows.
-_USE_WSL = False
+_USE_WSL = True
 
 # --- Windows-native settings (used when _USE_WSL = False) ---
 _PRISMAUDIO_DIR_WIN = "C:/AI/ThinkSound"
@@ -54,7 +54,7 @@ _PRISMAUDIO_DIR_WSL = "/home/mike_hunt/ThinkSound"
 _PRISMAUDIO_CONDA_ENV_WSL = "prismaudio"
 # Set to a direct Python path inside WSL to skip conda run, e.g.:
 #   "/home/mike_hunt/miniconda3/envs/prismaudio/bin/python"
-_PRISMAUDIO_PYTHON_WSL: str | None = None
+_PRISMAUDIO_PYTHON_WSL: str | None = "/home/mike_hunt/miniconda3/envs/prismaudio/bin/python"
 
 _MAX_LOG_LINES = 200
 
