@@ -153,7 +153,10 @@ class MMAudioHandler:
                  f"ls '{wsl_out_dir}/' 2>&1"],
                 capture_output=True, text=True,
             )
-            self._append_log(f"[copy] output dir contents: {ls_result.stdout.strip()}")
+            _dir_listing = f"[copy] output dir contents: {ls_result.stdout.strip()}"
+            logger.info("[mmaudio] %s", _dir_listing)
+            with self._lock:
+                self._job.log_lines.append(_dir_listing)
 
             copy_bash = (
                 f"f=$(ls -t '{wsl_out_dir}'/*.mp4 2>/dev/null | head -1); "
@@ -165,7 +168,6 @@ class MMAudioHandler:
             )
             if "OK" not in cp.stdout:
                 with self._lock:
-                    log_snippet = "\n".join(self._job.log_lines[-10:])
                     self._job.status = "error"
                     self._job.error = (
                         f"MMAudio output file not found. "
