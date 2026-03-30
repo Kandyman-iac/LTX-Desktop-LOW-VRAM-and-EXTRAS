@@ -7,6 +7,14 @@ from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from handlers.prismaudio_handler import (  # type: ignore[import]
+    _USE_WSL as _PRISMAUDIO_USE_WSL,
+    _PRISMAUDIO_DIR_WIN,
+    _PRISMAUDIO_DIR_WSL,
+    _PRISMAUDIO_CONDA_ENV,
+    _PRISMAUDIO_CONDA_ENV_WSL,
+)
+
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
 _WSL_DISTRO = "Ubuntu-24.04"
@@ -85,37 +93,58 @@ def _check_mmaudio(wsl_ok: bool) -> ToolStatus:
         return ToolStatus(name=name, available=False, detail="Check failed")
 
 
-def _check_prismaudio() -> ToolStatus:
+def _check_prismaudio(wsl_ok: bool) -> ToolStatus:
     name = "PrismAudio"
     try:
-        root = Path("C:/AI/ThinkSound")
-        has_dir = root.exists()
-        has_infer = (root / "infer.py").exists()
-        if not (has_dir and has_infer):
+        if _PRISMAUDIO_USE_WSL:
+            # WSL mode — check path inside WSL
+            if not wsl_ok:
+                return ToolStatus(
+                    name=name,
+                    available=False,
+                    detail="WSL not available — required (handler configured with _USE_WSL=True)",
+                )
+            ok, out = _wsl_check(
+                f"test -f '{_PRISMAUDIO_DIR_WSL}/infer.py' && "
+                f"conda env list 2>/dev/null | grep -q '^{_PRISMAUDIO_CONDA_ENV_WSL}' && echo OK || echo MISSING"
+            )
+            if "OK" in out:
+                return ToolStatus(
+                    name=name,
+                    available=True,
+                    detail=f"WSL mode — installed at {_PRISMAUDIO_DIR_WSL} (env: {_PRISMAUDIO_CONDA_ENV_WSL})",
+                )
             return ToolStatus(
                 name=name,
                 available=False,
-                detail="Not found at C:/AI/ThinkSound — run installers/install-prismaudio.ps1",
+                detail=f"WSL mode — not found at {_PRISMAUDIO_DIR_WSL} — run installers/install-prismaudio.ps1 -UseWSL",
             )
-        # Also verify the conda environment exists
-        conda_result = subprocess.run(
-            ["conda", "env", "list"],
-            capture_output=True,
-            timeout=10,
-        )
-        conda_out = conda_result.stdout.decode("utf-8", errors="replace")
-        env_ok = "prismaudio" in conda_out
-        if env_ok:
+        else:
+            # Windows-native mode
+            root = Path(_PRISMAUDIO_DIR_WIN)
+            if not (root.exists() and (root / "infer.py").exists()):
+                return ToolStatus(
+                    name=name,
+                    available=False,
+                    detail=f"Not found at {_PRISMAUDIO_DIR_WIN} — run installers/install-prismaudio.ps1",
+                )
+            conda_result = subprocess.run(
+                ["conda", "env", "list"],
+                capture_output=True,
+                timeout=10,
+            )
+            conda_out = conda_result.stdout.decode("utf-8", errors="replace")
+            if _PRISMAUDIO_CONDA_ENV in conda_out:
+                return ToolStatus(
+                    name=name,
+                    available=True,
+                    detail=f"Installed at {_PRISMAUDIO_DIR_WIN} (conda env: {_PRISMAUDIO_CONDA_ENV})",
+                )
             return ToolStatus(
                 name=name,
-                available=True,
-                detail="Installed at C:/AI/ThinkSound (conda env: prismaudio)",
+                available=False,
+                detail=f"Files found but '{_PRISMAUDIO_CONDA_ENV}' conda env missing — re-run installer",
             )
-        return ToolStatus(
-            name=name,
-            available=False,
-            detail="Files found but 'prismaudio' conda env missing — re-run installer",
-        )
     except Exception:
         return ToolStatus(name=name, available=False, detail="Check failed")
 
@@ -154,7 +183,7 @@ def route_tools_status() -> ToolsStatusResponse:
 
     tools: list[ToolStatus] = [
         _check_mmaudio(wsl_ok),
-        _check_prismaudio(),
+        _check_prismaudio(wsl_ok),
         _check_magihuman(wsl_ok),
     ]
 

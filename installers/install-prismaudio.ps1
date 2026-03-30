@@ -56,24 +56,42 @@
 
 [CmdletBinding()]
 param(
-    [string]$InstallDir = "C:\AI\ThinkSound",
-    [string]$CondaEnv   = "prismaudio",
-    [string]$GitRepo    = "https://github.com/FunAudioLLM/ThinkSound",
-    [string]$Branch     = "prismaudio"
+    [string]$InstallDir  = "",          # overrides mode default if set
+    [string]$CondaEnv    = "prismaudio",
+    [string]$GitRepo     = "https://github.com/FunAudioLLM/ThinkSound",
+    [string]$Branch      = "prismaudio",
+    [switch]$UseWSL,                    # install into WSL2 instead of Windows-native
+    [string]$WslDistro   = "Ubuntu-24.04",
+    [string]$WslUser     = "mike_hunt",
+    [string]$WslInstallDir = "/home/mike_hunt/ThinkSound"
 )
 
 $ErrorActionPreference = "Stop"
+
+# Resolve default InstallDir based on mode
+if (-not $InstallDir) {
+    $InstallDir = if ($UseWSL) { $WslInstallDir } else { "C:\AI\ThinkSound" }
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 function Write-Banner {
+    $mode = if ($UseWSL) { "WSL2 mode" } else { "Windows-native mode" }
     Write-Host ""
     Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Magenta
     Write-Host "  ║     RADICAL LTX Desktop — PrismAudio Installer       ║" -ForegroundColor Magenta
+    Write-Host "  ║     $($mode.PadRight(48))║" -ForegroundColor Magenta
     Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Magenta
     Write-Host ""
+}
+
+function Invoke-Wsl {
+    param([string]$Cmd)
+    $result = wsl -d $WslDistro -u $WslUser bash -c $Cmd
+    if ($LASTEXITCODE -ne 0) { throw "WSL command failed (exit $LASTEXITCODE): $Cmd" }
+    return $result
 }
 
 function Write-Step {
@@ -92,6 +110,108 @@ function Write-Err  { param([string]$Msg) Write-Host "  [!!] $Msg"  -ForegroundC
 # ---------------------------------------------------------------------------
 
 Write-Banner
+
+# ===========================================================================
+# WSL mode — all steps run inside WSL2
+# ===========================================================================
+if ($UseWSL) {
+
+# ── WSL Step 1: Verify WSL distro ─────────────────────────────────────────
+Write-Step 1 "Checking WSL2 distro ($WslDistro)"
+
+$wslList = wsl --list --quiet 2>&1
+$wslText  = try { [System.Text.Encoding]::Unicode.GetString([System.Text.Encoding]::Unicode.GetBytes($wslList)) } catch { $wslList }
+if ($wslText -notmatch [regex]::Escape($WslDistro)) {
+    Write-Err "WSL distro '$WslDistro' not found."
+    Write-Host "  Available distros:" -ForegroundColor White
+    $wslText.Split("`n") | Where-Object { $_ -match '\S' } | ForEach-Object { Write-Host "    $_" }
+    Write-Host "  Install Ubuntu 24.04 via: wsl --install -d Ubuntu-24.04" -ForegroundColor Yellow
+    exit 1
+}
+Write-OK "WSL distro '$WslDistro' found"
+
+# ── WSL Step 2: Check/install git inside WSL ──────────────────────────────
+Write-Step 2 "Checking git in WSL"
+$gitVer = wsl -d $WslDistro -u $WslUser bash -c "git --version 2>/dev/null || echo MISSING"
+if ($gitVer -match "MISSING") {
+    Write-Info "Installing git in WSL..."
+    Invoke-Wsl "sudo apt-get update -qq && sudo apt-get install -y git"
+}
+Write-OK "git ready: $gitVer"
+
+# ── WSL Step 3: Clone/update repo in WSL ──────────────────────────────────
+Write-Step 3 "Cloning ThinkSound into WSL at $InstallDir"
+$cloneResult = wsl -d $WslDistro -u $WslUser bash -c "
+    if [ -d '$InstallDir/.git' ]; then
+        echo ALREADY_EXISTS
+    else
+        git clone --branch $Branch --single-branch $GitRepo '$InstallDir' && echo CLONED || echo FAILED
+    fi
+"
+if ($cloneResult -match "FAILED") { throw "git clone inside WSL failed" }
+if ($cloneResult -match "ALREADY_EXISTS") {
+    Write-OK "Repo already present — pulling latest"
+    Invoke-Wsl "cd '$InstallDir' && git fetch origin && git checkout $Branch && git pull --ff-only origin $Branch"
+} else {
+    Write-OK "Repository cloned"
+}
+
+# ── WSL Step 4: Conda env + dependencies ──────────────────────────────────
+Write-Step 4 "Setting up conda env '$CondaEnv' in WSL"
+
+# Locate conda in WSL (try micromamba path fallbacks)
+$condaCmd = wsl -d $WslDistro -u $WslUser bash -c "
+    for p in conda mamba micromamba; do
+        if command -v \$p &>/dev/null; then echo \$p; break; fi
+    done
+" | Select-Object -First 1
+$condaCmd = $condaCmd.Trim()
+if (-not $condaCmd) { $condaCmd = "conda" }
+Write-Info "Using: $condaCmd"
+
+$envExists = wsl -d $WslDistro -u $WslUser bash -c "$condaCmd env list 2>/dev/null | grep -c '^$CondaEnv'" 2>&1
+if ([int]($envExists -replace '\D','0') -gt 0) {
+    Write-OK "Conda env '$CondaEnv' already exists"
+} else {
+    Write-Info "Creating conda env '$CondaEnv' with Python 3.10..."
+    Invoke-Wsl "$condaCmd create -y -n $CondaEnv python=3.10"
+    Write-OK "Env '$CondaEnv' created"
+}
+
+Write-Info "Installing dependencies (this may take several minutes)..."
+Invoke-Wsl "cd '$InstallDir' && $condaCmd run -n $CondaEnv pip install -r requirements.txt 2>&1 || ([ -f setup_windows.bat ] && echo 'Note: only Windows setup script found')"
+Write-OK "Dependencies installed"
+
+$pyVer = wsl -d $WslDistro -u $WslUser bash -c "$condaCmd run -n $CondaEnv python -c 'import sys; print(sys.version)'"
+Write-OK "Python: $pyVer"
+
+# ── WSL Step 5: Done ──────────────────────────────────────────────────────
+Write-Step 5 "Installation complete (WSL mode)"
+Write-Host ""
+Write-Host "  PrismAudio installed in WSL successfully!" -ForegroundColor Green
+Write-Host ""
+Write-Host "  WSL distro        : $WslDistro"  -ForegroundColor White
+Write-Host "  Install directory : $InstallDir" -ForegroundColor White
+Write-Host "  Conda environment : $CondaEnv"   -ForegroundColor White
+Write-Host ""
+Write-Host "  CONFIGURING RADICAL LTX DESKTOP" -ForegroundColor Yellow
+Write-Host "  ─────────────────────────────────────────────────────" -ForegroundColor DarkGray
+Write-Host "  In backend\handlers\prismaudio_handler.py set:" -ForegroundColor White
+Write-Host ""
+Write-Host "    _USE_WSL                 = True"               -ForegroundColor Yellow
+Write-Host "    _WSL_DISTRO              = `"$WslDistro`""     -ForegroundColor Yellow
+Write-Host "    _WSL_USER                = `"$WslUser`""       -ForegroundColor Yellow
+Write-Host "    _PRISMAUDIO_DIR_WSL      = `"$InstallDir`""    -ForegroundColor Yellow
+Write-Host "    _PRISMAUDIO_CONDA_ENV_WSL= `"$CondaEnv`""      -ForegroundColor Yellow
+Write-Host ""
+
+# Exit early — skip the Windows-native section below
+exit 0
+}
+
+# ===========================================================================
+# Windows-native mode (default)
+# ===========================================================================
 
 # ── Step 1: Verify git is installed ───────────────────────────────────────
 Write-Step 1 "Checking for Git"
@@ -267,12 +387,13 @@ Write-Host "  Git branch        : $Branch"      -ForegroundColor White
 Write-Host ""
 Write-Host "  CONFIGURING RADICAL LTX DESKTOP" -ForegroundColor Yellow
 Write-Host "  ─────────────────────────────────────────────────────" -ForegroundColor DarkGray
-Write-Host "  Open the handler file and update these two constants:" -ForegroundColor White
+Write-Host "  Open the handler file and verify these constants:" -ForegroundColor White
 Write-Host ""
 Write-Host "    backend\handlers\prismaudio_handler.py" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "    _PRISMAUDIO_DIR       = r`"$InstallDir`"" -ForegroundColor Yellow
-Write-Host "    _PRISMAUDIO_CONDA_ENV = `"$CondaEnv`"" -ForegroundColor Yellow
+Write-Host "    _USE_WSL                = False"               -ForegroundColor Yellow
+Write-Host "    _PRISMAUDIO_DIR_WIN     = r`"$InstallDir`""    -ForegroundColor Yellow
+Write-Host "    _PRISMAUDIO_CONDA_ENV   = `"$CondaEnv`""       -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  MODEL WEIGHTS" -ForegroundColor Yellow
 Write-Host "  ─────────────────────────────────────────────────────" -ForegroundColor DarkGray
