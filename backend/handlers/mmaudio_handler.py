@@ -143,38 +143,31 @@ class MMAudioHandler:
                     self._job.error = f"MMAudio exited with code {process.returncode}"
                     return
 
-            # Find the output file (MMAudio produces <prefix>_<hash>.mp4 or similar)
-            win_out = self._outputs_dir / f"{stem}.mp4"
-            win_wsl = _win_to_wsl_path(str(win_out))
-
-            # List what's in the output dir to aid debugging, then copy the mp4
-            ls_result = subprocess.run(
+            # Stream the output MP4 from WSL via cat → write on Windows side.
+            # Avoids WSL→Windows cp failures on /mnt/c/ paths.
+            cat_result = subprocess.run(
                 ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
-                 f"ls '{wsl_out_dir}/' 2>&1"],
-                capture_output=True, text=True,
+                 f"f=$(ls -t '{wsl_out_dir}'/*.mp4 2>/dev/null | head -1); "
+                 f"[ -n \"$f\" ] && cat \"$f\""],
+                capture_output=True,
             )
-            _dir_listing = f"[copy] output dir contents: {ls_result.stdout.strip()}"
-            logger.info("[mmaudio] %s", _dir_listing)
-            with self._lock:
-                self._job.log_lines.append(_dir_listing)
-
-            copy_bash = (
-                f"f=$(ls -t '{wsl_out_dir}'/*.mp4 2>/dev/null | head -1); "
-                f"[ -n \"$f\" ] && cp \"$f\" '{win_wsl}' && echo OK || echo NOTFOUND"
-            )
-            cp = subprocess.run(
-                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", copy_bash],
-                capture_output=True, text=True,
-            )
-            if "OK" not in cp.stdout:
+            if cat_result.returncode != 0 or not cat_result.stdout:
+                ls_out = subprocess.run(
+                    ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
+                     f"ls '{wsl_out_dir}/' 2>&1"],
+                    capture_output=True, text=True,
+                ).stdout.strip()
                 with self._lock:
                     self._job.status = "error"
                     self._job.error = (
-                        f"MMAudio output file not found. "
-                        f"Dir: {ls_result.stdout.strip() or '(empty)'}. "
-                        f"stderr: {cp.stderr.strip()}"
+                        f"MMAudio output MP4 not found or empty. "
+                        f"Dir: {ls_out or '(empty)'}. "
+                        f"stderr: {cat_result.stderr.decode('utf-8', errors='replace').strip()}"
                     )
                 return
+
+            win_out = self._outputs_dir / f"{stem}.mp4"
+            win_out.write_bytes(cat_result.stdout)
 
             # Clean up WSL temp dir
             subprocess.run(

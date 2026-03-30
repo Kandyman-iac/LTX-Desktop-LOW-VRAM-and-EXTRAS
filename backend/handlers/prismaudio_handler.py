@@ -290,22 +290,22 @@ class PrismAudioHandler:
                     self._job.error = f"PrismAudio exited with code {process.returncode}"
                     return
 
-            # Mix generated WAV with source video → MP4
-            win_out = self._outputs_dir / f"{stem}.mp4"
-            win_wsl = _win_to_wsl_path(str(win_out))
-
+            # Mix WAV + source video → MP4 inside WSL, then stream to Windows via cat.
+            # Avoids WSL→Windows cp failures on /mnt/c/ paths.
+            wsl_mixed = f"/tmp/prismaudio_mixed_{stem}.mp4"
             mix_bash = (
                 f"wav=$(find '{wsl_results_dir}' -name '*.wav' 2>/dev/null | head -1); "
                 f"[ -n \"$wav\" ] && "
                 f"ffmpeg -y -i '{wsl_video_path}' -i \"$wav\" "
-                f"-c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest '{win_wsl}' "
-                f"&& echo OK || echo NOTFOUND"
+                f"-c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest '{wsl_mixed}' "
+                f"&& echo OK || echo FAILED"
             )
-            cp = subprocess.run(
+            mix = subprocess.run(
                 ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", mix_bash],
                 capture_output=True, text=True,
             )
-            # Cleanup WSL temp dir and repo scratch files
+
+            # Cleanup WSL temp dirs regardless of mix result
             subprocess.run(
                 ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
                  f"rm -rf '{wsl_results_dir}'"
@@ -314,14 +314,29 @@ class PrismAudioHandler:
                 capture_output=True,
             )
 
-            if "OK" not in cp.stdout:
+            if "OK" not in mix.stdout:
                 with self._lock:
                     self._job.status = "error"
                     self._job.error = (
-                        f"PrismAudio output WAV not found or ffmpeg mix failed. "
-                        f"stderr: {cp.stderr.strip()}"
+                        f"PrismAudio WAV not found or ffmpeg mix failed. "
+                        f"stderr: {mix.stderr.strip()}"
                     )
                 return
+
+            # Stream mixed MP4 from WSL → write on Windows side
+            cat_result = subprocess.run(
+                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
+                 f"cat '{wsl_mixed}'; rm -f '{wsl_mixed}'"],
+                capture_output=True,
+            )
+            if not cat_result.stdout:
+                with self._lock:
+                    self._job.status = "error"
+                    self._job.error = "PrismAudio mixed MP4 was empty after ffmpeg"
+                return
+
+            win_out = self._outputs_dir / f"{stem}.mp4"
+            win_out.write_bytes(cat_result.stdout)
 
             with self._lock:
                 self._job.status = "complete"
