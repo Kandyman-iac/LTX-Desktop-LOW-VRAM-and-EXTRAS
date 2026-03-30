@@ -3,11 +3,17 @@
 Supports two modes controlled by _USE_WSL:
   False (default) — native Windows, uses conda env or direct Python executable
   True            — WSL2 subprocess (same pattern as MMAudio/MagiHuman)
+
+Inference flow (replicates scripts/PrismAudio/demo.sh):
+  1. Copy video → videos/demo.mp4 in repo dir
+  2. Write cot_coarse/cot.csv with the text prompt
+  3. Feature extraction: torchrun data_utils/prismaudio_data_process.py --inference_mode True
+  4. Inference: python predict.py --model-config ... --duration-sec ... --results-dir <tmp>
+  5. Mix generated WAV with source video via ffmpeg → output .mp4
 """
 
 from __future__ import annotations
 
-import glob
 import logging
 import shutil
 import subprocess
@@ -119,55 +125,101 @@ class PrismAudioHandler:
 
     def _run_windows(self, req: PrismAudioGenerateRequest) -> None:
         stem = f"prismaudio_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-        out_dir = tempfile.mkdtemp(prefix="prismaudio_")
-
-        if _PRISMAUDIO_PYTHON_WIN:
-            cmd: list[str] = [_PRISMAUDIO_PYTHON_WIN, "infer.py"]
-        else:
-            cmd = ["conda", "run", "-n", _PRISMAUDIO_CONDA_ENV, "--no-capture-output", "python", "infer.py"]
-
-        cmd += ["--video_path", req.video_path, "--save_dir", out_dir]
-        if req.prompt.strip():
-            cmd += ["--text_prompt", req.prompt]
-        if req.seed is not None:
-            cmd += ["--seed", str(req.seed)]
+        repo_dir = Path(_PRISMAUDIO_DIR_WIN)
+        results_dir = Path(tempfile.mkdtemp(prefix="prismaudio_"))
 
         logger.info("[prismaudio/win] Starting: video=%s prompt=%r", req.video_path, req.prompt)
 
         try:
-            process = subprocess.Popen(
-                cmd,
-                cwd=_PRISMAUDIO_DIR_WIN,
-                stdout=PIPE, stderr=STDOUT,
-                text=True, bufsize=1, encoding="utf-8", errors="replace",
+            # Step 1: Copy video to videos/demo.mp4 (expected by data_process.py)
+            videos_dir = repo_dir / "videos"
+            videos_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(req.video_path, str(videos_dir / "demo.mp4"))
+
+            # Step 2: Get video duration for predict.py --duration-sec
+            duration = _get_video_duration(req.video_path)
+
+            # Step 3: Write cot_coarse/cot.csv with the text prompt
+            cot_dir = repo_dir / "cot_coarse"
+            cot_dir.mkdir(parents=True, exist_ok=True)
+            safe_csv_prompt = req.prompt.replace('"', '""')
+            (cot_dir / "cot.csv").write_text(
+                f'id,caption_cot\ndemo,"{safe_csv_prompt}"\n', encoding="utf-8"
             )
-            with self._lock:
-                self._job.process = process
 
-            assert process.stdout is not None
-            for line in process.stdout:
-                self._append_log(line.rstrip())
+            # Step 4: Feature extraction via torchrun
+            if _PRISMAUDIO_PYTHON_WIN:
+                tr_cmd: list[str] = [
+                    _PRISMAUDIO_PYTHON_WIN, "-m", "torch.distributed.run", "--nproc_per_node=1",
+                ]
+            else:
+                tr_cmd = [
+                    "conda", "run", "-n", _PRISMAUDIO_CONDA_ENV, "--no-capture-output",
+                    "torchrun", "--nproc_per_node=1",
+                ]
+            tr_cmd += ["data_utils/prismaudio_data_process.py", "--inference_mode", "True"]
+            if not self._run_step(tr_cmd, str(repo_dir), "Feature extraction"):
+                return
 
-            process.wait()
+            # Step 5: Inference via predict.py
+            if _PRISMAUDIO_PYTHON_WIN:
+                pred_cmd: list[str] = [_PRISMAUDIO_PYTHON_WIN]
+            else:
+                pred_cmd = ["conda", "run", "-n", _PRISMAUDIO_CONDA_ENV, "--no-capture-output", "python"]
+            pred_cmd += [
+                "predict.py",
+                "--model-config", "PrismAudio/configs/model_configs/prismaudio.json",
+                "--duration-sec", str(duration),
+                "--ckpt-dir", "ckpts/prismaudio.ckpt",
+                "--results-dir", str(results_dir).replace("\\", "/"),
+            ]
+            if req.seed is not None:
+                pred_cmd += ["--seed", str(req.seed)]
+            if not self._run_step(pred_cmd, str(repo_dir), "Inference"):
+                return
 
-            with self._lock:
-                if self._job.status == "cancelled":
-                    shutil.rmtree(out_dir, ignore_errors=True)
-                    return
-                if process.returncode != 0:
+            # Step 6: Find WAV output
+            wav_matches = list(results_dir.rglob("*.wav"))
+            if not wav_matches:
+                with self._lock:
                     self._job.status = "error"
-                    self._job.error = f"PrismAudio exited with code {process.returncode}"
-                    shutil.rmtree(out_dir, ignore_errors=True)
-                    return
+                    self._job.error = "PrismAudio output WAV not found after generation"
+                return
 
-            self._copy_output(out_dir, stem)
+            # Step 7: Mix WAV + source video → MP4
+            win_out = self._outputs_dir / f"{stem}.mp4"
+            ffmpeg_res = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", req.video_path,
+                    "-i", str(wav_matches[0]),
+                    "-c:v", "copy", "-c:a", "aac",
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-shortest", str(win_out),
+                ],
+                capture_output=True,
+            )
+            if ffmpeg_res.returncode != 0:
+                with self._lock:
+                    self._job.status = "error"
+                    self._job.error = (
+                        f"ffmpeg audio mix failed: "
+                        f"{ffmpeg_res.stderr.decode('utf-8', errors='replace').strip()}"
+                    )
+                return
+
+            with self._lock:
+                self._job.status = "complete"
+                self._job.output_path = str(win_out)
+                self._job.log_lines.append(f"✓ Output: {win_out}")
 
         except Exception as exc:
             logger.exception("[prismaudio/win] Unexpected error")
-            shutil.rmtree(out_dir, ignore_errors=True)
             with self._lock:
                 self._job.status = "error"
                 self._job.error = str(exc)
+        finally:
+            shutil.rmtree(str(results_dir), ignore_errors=True)
 
     # ------------------------------------------------------------------
     # WSL path
@@ -175,27 +227,40 @@ class PrismAudioHandler:
 
     def _run_wsl(self, req: PrismAudioGenerateRequest) -> None:
         stem = f"prismaudio_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-        wsl_out_dir = f"/tmp/prismaudio_out_{stem}"
+        wsl_results_dir = f"/tmp/prismaudio_results_{stem}"
         wsl_video_path = _win_to_wsl_path(req.video_path)
 
         if _PRISMAUDIO_PYTHON_WSL:
-            py_prefix = _PRISMAUDIO_PYTHON_WSL
+            python_bin = _PRISMAUDIO_PYTHON_WSL
+            torchrun_bin = str(Path(_PRISMAUDIO_PYTHON_WSL).parent / "torchrun")
         else:
-            py_prefix = f"conda run -n {_PRISMAUDIO_CONDA_ENV_WSL} --no-capture-output python"
+            python_bin = f"conda run -n {_PRISMAUDIO_CONDA_ENV_WSL} --no-capture-output python"
+            torchrun_bin = f"conda run -n {_PRISMAUDIO_CONDA_ENV_WSL} --no-capture-output torchrun"
 
-        # Escape single quotes in prompt
+        # Escape single quotes in prompt for embedding in bash single-quoted strings
         safe_prompt = req.prompt.replace("'", "'\\''")
+        seed_arg = f" --seed {req.seed}" if req.seed is not None else ""
+
+        # Replicate demo.sh steps with a custom results dir (avoids date-based collisions)
         inner = (
-            f"mkdir -p '{wsl_out_dir}' && "
-            f"cd '{_PRISMAUDIO_DIR_WSL}' && "
-            f"{py_prefix} infer.py"
-            f" --video_path '{wsl_video_path}'"
-            f" --save_dir '{wsl_out_dir}'"
+            f"set -e\n"
+            f"cd '{_PRISMAUDIO_DIR_WSL}'\n"
+            f"mkdir -p videos cot_coarse '{wsl_results_dir}'\n"
+            f"cp '{wsl_video_path}' videos/demo.mp4\n"
+            f"DURATION=$(ffprobe -v error -show_entries format=duration"
+            f" -of default=noprint_wrappers=1:nokey=1 videos/demo.mp4 2>/dev/null || echo 10)\n"
+            f"printf 'id,caption_cot\\ndemo,\"{safe_prompt}\"\\n' > cot_coarse/cot.csv\n"
+            f"echo '==> Feature extraction'\n"
+            f"{torchrun_bin} --nproc_per_node=1"
+            f" data_utils/prismaudio_data_process.py --inference_mode True\n"
+            f"echo '==> Running inference'\n"
+            f"{python_bin} predict.py"
+            f" --model-config PrismAudio/configs/model_configs/prismaudio.json"
+            f" --duration-sec \"$DURATION\""
+            f" --ckpt-dir ckpts/prismaudio.ckpt"
+            f" --results-dir '{wsl_results_dir}'"
+            f"{seed_arg}\n"
         )
-        if req.prompt.strip():
-            inner += f" --text_prompt '{safe_prompt}'"
-        if req.seed is not None:
-            inner += f" --seed {req.seed}"
 
         cmd = ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", inner]
         logger.info("[prismaudio/wsl] Starting: video=%s prompt=%r", req.video_path, req.prompt)
@@ -223,27 +288,37 @@ class PrismAudioHandler:
                     self._job.error = f"PrismAudio exited with code {process.returncode}"
                     return
 
-            # Copy output from WSL to Windows outputs dir
+            # Mix generated WAV with source video → MP4
             win_out = self._outputs_dir / f"{stem}.mp4"
             win_wsl = _win_to_wsl_path(str(win_out))
 
-            copy_bash = (
-                f"f=$(ls -t '{wsl_out_dir}'/*.mp4 2>/dev/null | head -1); "
-                f"[ -n \"$f\" ] && cp \"$f\" '{win_wsl}' && echo OK || echo NOTFOUND"
+            mix_bash = (
+                f"wav=$(find '{wsl_results_dir}' -name '*.wav' 2>/dev/null | head -1); "
+                f"[ -n \"$wav\" ] && "
+                f"ffmpeg -y -i '{wsl_video_path}' -i \"$wav\" "
+                f"-c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest '{win_wsl}' "
+                f"&& echo OK || echo NOTFOUND"
             )
             cp = subprocess.run(
-                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", copy_bash],
+                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", mix_bash],
                 capture_output=True, text=True,
             )
-            # Cleanup WSL temp dir
+            # Cleanup WSL temp dir and repo scratch files
             subprocess.run(
-                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c", f"rm -rf '{wsl_out_dir}'"],
+                ["wsl", "-d", _WSL_DISTRO, "-u", _WSL_USER, "bash", "-c",
+                 f"rm -rf '{wsl_results_dir}'"
+                 f" '{_PRISMAUDIO_DIR_WSL}/videos/demo.mp4'"
+                 f" '{_PRISMAUDIO_DIR_WSL}/cot_coarse/cot.csv'"],
                 capture_output=True,
             )
+
             if "OK" not in cp.stdout:
                 with self._lock:
                     self._job.status = "error"
-                    self._job.error = f"PrismAudio output not found after generation. stderr: {cp.stderr.strip()}"
+                    self._job.error = (
+                        f"PrismAudio output WAV not found or ffmpeg mix failed. "
+                        f"stderr: {cp.stderr.strip()}"
+                    )
                 return
 
             with self._lock:
@@ -261,31 +336,35 @@ class PrismAudioHandler:
     # Shared helpers
     # ------------------------------------------------------------------
 
+    def _run_step(self, cmd: list[str], cwd: str, label: str) -> bool:
+        """Run a subprocess step, stream logs. Returns True on success."""
+        self._append_log(f"==> {label}")
+        process = subprocess.Popen(
+            cmd, cwd=cwd,
+            stdout=PIPE, stderr=STDOUT,
+            text=True, bufsize=1, encoding="utf-8", errors="replace",
+        )
+        with self._lock:
+            self._job.process = process
+        assert process.stdout is not None
+        for line in process.stdout:
+            self._append_log(line.rstrip())
+        process.wait()
+        with self._lock:
+            if self._job.status == "cancelled":
+                return False
+            if process.returncode != 0:
+                self._job.status = "error"
+                self._job.error = f"{label} failed (exit {process.returncode})"
+                return False
+        return True
+
     def _append_log(self, line: str) -> None:
         logger.info("[prismaudio] %s", line)
         with self._lock:
             self._job.log_lines.append(line)
             if len(self._job.log_lines) > _MAX_LOG_LINES:
                 self._job.log_lines = self._job.log_lines[-_MAX_LOG_LINES:]
-
-    def _copy_output(self, out_dir: str, stem: str) -> None:
-        """Find the output MP4, copy to outputs_dir, clean up temp dir."""
-        matches = glob.glob(f"{out_dir}/*.mp4")
-        if not matches:
-            shutil.rmtree(out_dir, ignore_errors=True)
-            with self._lock:
-                self._job.status = "error"
-                self._job.error = "PrismAudio output MP4 not found in temp directory"
-            return
-
-        win_out = self._outputs_dir / f"{stem}.mp4"
-        shutil.copy2(matches[0], win_out)
-        shutil.rmtree(out_dir, ignore_errors=True)
-
-        with self._lock:
-            self._job.status = "complete"
-            self._job.output_path = str(win_out)
-            self._job.log_lines.append(f"✓ Output: {win_out}")
 
 
 # ------------------------------------------------------------------
@@ -299,3 +378,20 @@ def _win_to_wsl_path(win_path: str) -> str:
         drive = p[0].lower()
         p = f"/mnt/{drive}{p[2:]}"
     return p
+
+
+def _get_video_duration(video_path: str) -> float:
+    """Get video duration in seconds via ffprobe. Returns 10.0 on failure."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 10.0

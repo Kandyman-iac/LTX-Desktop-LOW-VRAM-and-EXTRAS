@@ -138,7 +138,7 @@ export function AddAudioPanel({ isProcessing, audioState, onChange }: AddAudioPa
         <p className="text-[11px] text-zinc-600 mt-1">
           {engine === 'mmaudio'
             ? 'Synchronized ambient/music — runs in WSL'
-            : 'Foley & SFX with spatial audio — runs on Windows'}
+            : 'Foley & SFX with spatial audio — WSL or Windows (conda)'}
         </p>
       </div>
 
@@ -290,7 +290,7 @@ export function AddAudioPanel({ isProcessing, audioState, onChange }: AddAudioPa
 
       <div className="flex items-center gap-1.5 text-[11px] text-zinc-600">
         <Music className="h-3 w-3" />
-        <span>Requires {engine === 'mmaudio' ? 'MMAudio (WSL)' : 'PrismAudio (Windows)'} — see Settings → Tools</span>
+        <span>Requires {engine === 'mmaudio' ? 'MMAudio (WSL)' : 'PrismAudio (WSL/Windows)'} — see Settings → Tools</span>
       </div>
     </div>
   )

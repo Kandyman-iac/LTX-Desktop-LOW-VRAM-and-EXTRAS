@@ -105,7 +105,7 @@ def _check_prismaudio(wsl_ok: bool) -> ToolStatus:
                     detail="WSL not available — required (handler configured with _USE_WSL=True)",
                 )
             ok, out = _wsl_check(
-                f"test -f '{_PRISMAUDIO_DIR_WSL}/infer.py' && "
+                f"test -f '{_PRISMAUDIO_DIR_WSL}/predict.py' && "
                 f"conda env list 2>/dev/null | grep -q '^{_PRISMAUDIO_CONDA_ENV_WSL}' && echo OK || echo MISSING"
             )
             if "OK" in out:
@@ -122,7 +122,7 @@ def _check_prismaudio(wsl_ok: bool) -> ToolStatus:
         else:
             # Windows-native mode
             root = Path(_PRISMAUDIO_DIR_WIN)
-            if not (root.exists() and (root / "infer.py").exists()):
+            if not (root.exists() and (root / "predict.py").exists()):
                 return ToolStatus(
                     name=name,
                     available=False,
