@@ -5,7 +5,8 @@ import { MultiFrameConditioningPanel, type ConditioningFrame } from '../componen
 import { AudioUploader } from '../components/AudioUploader'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { ImageResult } from '../components/ImageResult'
-import { SettingsPanel, type GenerationSettings } from '../components/SettingsPanel'
+import { SettingsPanel, type GenerationSettings, type VariantSelectPayload } from '../components/SettingsPanel'
+import { useCheckpointVariants } from '../hooks/use-checkpoint-variants'
 import { ModeTabs, type GenerationMode } from '../components/ModeTabs'
 import { LtxLogo } from '../components/LtxLogo'
 import { ModelStatusDropdown } from '../components/ModelStatusDropdown'
@@ -52,7 +53,7 @@ const DEFAULT_SETTINGS: GenerationSettings = {
 
 export function Playground() {
   const { goHome } = useProjects()
-  const { forceApiGenerations, shouldVideoGenerateWithLtxApi, settings: appSettings } = useAppSettings()
+  const { forceApiGenerations, shouldVideoGenerateWithLtxApi, settings: appSettings, updateSettings: updateAppSettings } = useAppSettings()
   const [mode, setMode] = useState<GenerationMode>('text-to-video')
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
@@ -76,6 +77,27 @@ export function Playground() {
   const [showOutputBrowser, setShowOutputBrowser] = useState(false)
   const { push: pushHistory, getAll: getHistory, remove: removeHistory } = useGenerationHistory()
   const historyEntries = useMemo(() => (showHistory ? getHistory() : []), [showHistory, getHistory])
+
+  const { variants: checkpointVariants } = useCheckpointVariants()
+
+  // Derive which variant is currently active from AppSettings
+  const activeVariantId = useMemo(() => {
+    if (appSettings.ggufTransformerPath) {
+      const gguf = checkpointVariants.find((v) => v.gguf_path === appSettings.ggufTransformerPath)
+      if (gguf) return gguf.id
+    }
+    if (settings.model === 'dev') return 'dev'
+    if (appSettings.useFp8Transformer) return 'fast-fp8'
+    return 'fast-bf16'
+  }, [appSettings.ggufTransformerPath, appSettings.useFp8Transformer, settings.model, checkpointVariants])
+
+  const handleVariantSelect = (payload: VariantSelectPayload) => {
+    setSettings((prev) => ({ ...prev, model: payload.model }))
+    updateAppSettings({
+      ggufTransformerPath: payload.ggufTransformerPath,
+      useFp8Transformer: payload.useFp8Transformer,
+    })
+  }
 
   const { status, processStatus } = useBackend()
   const { jobs: queueJobs, addToQueue, removeFromQueue } = useQueue()
@@ -900,6 +922,9 @@ export function Playground() {
                 mode={mode}
                 forceApiGenerations={shouldVideoGenerateWithLtxApi}
                 hasAudio={!!selectedAudio}
+                variants={checkpointVariants}
+                activeVariantId={activeVariantId}
+                onVariantSelect={handleVariantSelect}
               />
             )}
 

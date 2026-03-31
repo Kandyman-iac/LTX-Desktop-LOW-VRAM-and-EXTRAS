@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 
 from api_types import (
+    CheckpointVariant,
     DownloadProgressResponse,
     ModelDownloadRequest,
     ModelDownloadStartResponse,
@@ -22,6 +23,11 @@ from app_handler import AppHandler
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["models"])
+
+
+@router.get("/models/checkpoint-variants", response_model=list[CheckpointVariant])
+def route_checkpoint_variants(handler: AppHandler = Depends(get_state_service)) -> list[CheckpointVariant]:
+    return handler.models.get_checkpoint_variants()
 
 
 @router.get("/models", response_model=list[ModelInfo])

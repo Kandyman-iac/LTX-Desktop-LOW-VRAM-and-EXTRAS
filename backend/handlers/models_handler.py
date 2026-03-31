@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING
 
-from api_types import ModelFileStatus, ModelInfo, ModelsStatusResponse, TextEncoderStatus
+from api_types import CheckpointVariant, ModelFileStatus, ModelInfo, ModelsStatusResponse, TextEncoderStatus
 from handlers.base import StateHandlerBase, with_state_lock
 from runtime_config.model_download_specs import MODEL_FILE_ORDER, resolve_model_path, resolve_required_model_types
 from state.app_state_types import AppState, AvailableFiles, ModelFileType
@@ -61,6 +61,83 @@ class ModelsHandler(StateHandlerBase):
             size_gb=round((size_bytes if exists else expected) / (1024**3), 1),
             expected_size_gb=round(expected / (1024**3), 1),
         )
+
+    def get_checkpoint_variants(self) -> list[CheckpointVariant]:
+        """Scan models dir and return all usable checkpoint variants."""
+        d = self.models_dir
+        variants: list[CheckpointVariant] = []
+
+        distilled = d / "ltx-2.3-22b-distilled.safetensors"
+        fp8_preq  = d / "fp8_transformer.safetensors"
+        distilled_lora = d / "ltx-2.3-22b-distilled-lora-384.safetensors"
+
+        def _gb(path: Path) -> float:
+            try:
+                return round(path.stat().st_size / (1024 ** 3), 1)
+            except OSError:
+                return 0.0
+
+        # ── Fast BF16 ──────────────────────────────────────────────────
+        variants.append(CheckpointVariant(
+            id="fast-bf16",
+            label="Fast — BF16",
+            description="Full-precision distilled model. Best accuracy, highest VRAM (~24 GB).",
+            available=distilled.exists(),
+            pipeline_type="fast",
+            gguf_path="",
+            use_fp8=False,
+            size_gb=_gb(distilled) if distilled.exists() else 43.0,
+        ))
+
+        # ── Fast FP8 (pre-quantized) ───────────────────────────────────
+        if fp8_preq.exists():
+            variants.append(CheckpointVariant(
+                id="fast-fp8",
+                label="Fast — FP8 (pre-quantized)",
+                description="FP8 pre-quantized transformer. Faster load, ~10–12 GB VRAM.",
+                available=distilled.exists(),  # still needs the full checkpoint for non-transformer parts
+                pipeline_type="fast",
+                gguf_path="",
+                use_fp8=True,
+                size_gb=_gb(fp8_preq),
+            ))
+
+        # ── Fast GGUF variants (one per .gguf file in models dir) ──────
+        for gguf_file in sorted(d.glob("*.gguf")):
+            stem = gguf_file.stem
+            # Parse quantisation tag from filename (e.g. "...-Q8_0" → "Q8_0")
+            quant = stem.rsplit("-", 1)[-1].upper() if "-" in stem else stem.upper()
+            variants.append(CheckpointVariant(
+                id=f"fast-gguf-{quant.lower()}",
+                label=f"Fast — GGUF {quant}",
+                description=(
+                    f"GGUF {quant} transformer. Smaller file; VRAM same as BF16 "
+                    f"(dequantized to BF16 at load). File: {gguf_file.name}"
+                ),
+                available=True,
+                pipeline_type="fast",
+                gguf_path=str(gguf_file),
+                use_fp8=False,
+                size_gb=_gb(gguf_file),
+            ))
+
+        # ── Dev (two-stage, requires distilled_lora) ───────────────────
+        dev_available = distilled.exists() and distilled_lora.exists()
+        variants.append(CheckpointVariant(
+            id="dev",
+            label="Dev — High Quality (CFG + LoRA)",
+            description=(
+                "Two-stage pipeline: real CFG, negative prompt, STG. "
+                "Requires distilled LoRA (7 GB). Slower but higher quality."
+            ),
+            available=dev_available,
+            pipeline_type="dev",
+            gguf_path="",
+            use_fp8=False,
+            size_gb=round(_gb(distilled) + _gb(distilled_lora), 1) if dev_available else None,
+        ))
+
+        return variants
 
     def get_models_list(self) -> list[ModelInfo]:
         pro_steps = self.state.app_settings.pro_model.steps

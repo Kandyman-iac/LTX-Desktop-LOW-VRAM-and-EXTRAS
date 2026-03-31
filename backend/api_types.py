@@ -65,6 +65,18 @@ VideoCameraMotion = Literal[
 # ============================================================
 
 
+class CheckpointVariant(BaseModel):
+    """A selectable model variant — combination of pipeline type and checkpoint file."""
+    id: str
+    label: str
+    description: str
+    available: bool
+    pipeline_type: str   # "fast" | "dev"
+    gguf_path: str = ""  # non-empty → use GGUF transformer
+    use_fp8: bool = False  # True → use pre-quantized FP8 transformer
+    size_gb: float | None = None
+
+
 class ModelStatusItem(BaseModel):
     id: str
     name: str

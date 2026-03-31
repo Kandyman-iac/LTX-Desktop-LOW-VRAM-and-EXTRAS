@@ -1,12 +1,19 @@
 import { useState } from 'react'
 import { Select } from './ui/select'
 import type { GenerationMode } from './ModeTabs'
+import type { CheckpointVariant } from '../hooks/use-checkpoint-variants'
 import {
   FORCED_API_VIDEO_FPS,
   FORCED_API_VIDEO_RESOLUTIONS,
   getAllowedForcedApiDurations,
   sanitizeForcedApiVideoSettings,
 } from '../lib/api-video-options'
+
+export interface VariantSelectPayload {
+  model: 'fast' | 'pro' | 'dev'
+  ggufTransformerPath: string
+  useFp8Transformer: boolean
+}
 
 export interface GenerationSettings {
   model: 'fast' | 'pro' | 'dev'
@@ -34,6 +41,12 @@ interface SettingsPanelProps {
   mode?: GenerationMode
   forceApiGenerations?: boolean
   hasAudio?: boolean
+  /** Available checkpoint variants from the backend (fast-bf16, fast-fp8, fast-gguf-*, dev) */
+  variants?: CheckpointVariant[]
+  /** Currently selected variant id — derived by parent from active settings */
+  activeVariantId?: string
+  /** Called when user picks a variant; parent applies model + VRAM settings */
+  onVariantSelect?: (payload: VariantSelectPayload) => void
 }
 
 export function SettingsPanel({
@@ -43,6 +56,9 @@ export function SettingsPanel({
   mode = 'text-to-video',
   forceApiGenerations = false,
   hasAudio = false,
+  variants,
+  activeVariantId,
+  onVariantSelect,
 }: SettingsPanelProps) {
   const isImageMode = mode === 'text-to-image'
   const LOCAL_MAX_DURATION: Record<string, number> = { '540p': 30, '720p': 30, '1080p': 10 }
@@ -112,17 +128,49 @@ export function SettingsPanel({
   // Video mode settings
   return (
     <div className="space-y-4">
-      {/* Model Selection */}
+      {/* Model / Checkpoint Selection */}
       {!forceApiGenerations ? (
-        <Select
-          label="Model"
-          value={settings.model}
-          onChange={(e) => handleChange('model', e.target.value)}
-          disabled={disabled}
-        >
-          <option value="fast">LTX 2.3 Fast</option>
-          <option value="dev">LTX 2.3 Dev (High Quality)</option>
-        </Select>
+        variants && variants.length > 0 && onVariantSelect ? (
+          <div>
+            <Select
+              label="Model"
+              value={activeVariantId ?? 'fast-bf16'}
+              onChange={(e) => {
+                const v = variants.find((x) => x.id === e.target.value)
+                if (!v) return
+                onVariantSelect({
+                  model: v.pipeline_type as 'fast' | 'pro' | 'dev',
+                  ggufTransformerPath: v.gguf_path,
+                  useFp8Transformer: v.use_fp8,
+                })
+              }}
+              disabled={disabled}
+            >
+              {variants.map((v) => (
+                <option key={v.id} value={v.id} disabled={!v.available}>
+                  {v.label}{v.size_gb ? ` (${v.size_gb} GB)` : ''}{!v.available ? ' — not downloaded' : ''}
+                </option>
+              ))}
+            </Select>
+            {/* Description tooltip for selected variant */}
+            {(() => {
+              const active = variants.find((v) => v.id === (activeVariantId ?? 'fast-bf16'))
+              return active ? (
+                <p className="text-xs text-zinc-500 mt-1 leading-tight">{active.description}</p>
+              ) : null
+            })()}
+          </div>
+        ) : (
+          <Select
+            label="Model"
+            value={settings.model}
+            onChange={(e) => handleChange('model', e.target.value)}
+            disabled={disabled}
+          >
+            <option value="fast">LTX 2.3 Fast</option>
+            <option value="dev">LTX 2.3 Dev (High Quality)</option>
+          </Select>
+        )
       ) : (
         <Select
           label="Model"
