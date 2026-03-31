@@ -53,7 +53,7 @@ DEFAULT_MODEL_DOWNLOAD_SPECS: dict[ModelFileType, ModelFileDownloadSpec] = {
     ),
     "distilled_lora": ModelFileDownloadSpec(
         relative_path=Path("ltx-2.3-22b-distilled-lora-384.safetensors"),
-        expected_size_bytes=400_000_000,
+        expected_size_bytes=7_500_000_000,
         is_folder=False,
         repo_id="Lightricks/LTX-2.3",
         description="LoRA for Pro model",
