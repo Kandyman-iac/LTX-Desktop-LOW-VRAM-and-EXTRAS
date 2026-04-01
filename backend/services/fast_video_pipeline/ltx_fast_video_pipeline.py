@@ -28,6 +28,7 @@ class LTXFastVideoPipeline:
         attention_tile_size: int = 0,
         use_fp8_transformer: bool = False,
         gguf_transformer_path: str = "",
+        gguf_per_layer_quant: bool = True,
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
         pre_quantized_transformer_path: str = "",
@@ -43,6 +44,7 @@ class LTXFastVideoPipeline:
             attention_tile_size=attention_tile_size,
             use_fp8_transformer=use_fp8_transformer,
             gguf_transformer_path=gguf_transformer_path,
+            gguf_per_layer_quant=gguf_per_layer_quant,
             vae_spatial_tile_size=vae_spatial_tile_size,
             vae_temporal_tile_size=vae_temporal_tile_size,
             pre_quantized_transformer_path=pre_quantized_transformer_path,
@@ -60,6 +62,7 @@ class LTXFastVideoPipeline:
         attention_tile_size: int = 0,
         use_fp8_transformer: bool = False,
         gguf_transformer_path: str = "",
+        gguf_per_layer_quant: bool = True,
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
         pre_quantized_transformer_path: str = "",
@@ -73,6 +76,7 @@ class LTXFastVideoPipeline:
         self._block_swap_blocks_on_gpu = block_swap_blocks_on_gpu
         self._attention_tile_size = attention_tile_size
         self._gguf_transformer_path = gguf_transformer_path
+        self._gguf_per_layer_quant = gguf_per_layer_quant
         self._vae_spatial_tile_size = vae_spatial_tile_size
         self._vae_temporal_tile_size = vae_temporal_tile_size
 
@@ -96,7 +100,7 @@ class LTXFastVideoPipeline:
 
         # ── Install GGUF loader (replaces transformer weights source) ──
         if gguf_transformer_path:
-            self._install_gguf(gguf_transformer_path)
+            self._install_gguf(gguf_transformer_path, per_layer_quant=gguf_per_layer_quant)
 
         # ── Install block swapping ──
         if block_swap_blocks_on_gpu > 0:
@@ -142,12 +146,26 @@ class LTXFastVideoPipeline:
                 "Pre-quantized FP8 install failed (%s) — falling back to on-the-fly fp8_cast", exc
             )
 
-    def _install_gguf(self, gguf_path: str) -> None:
+    def _install_gguf(self, gguf_path: str, per_layer_quant: bool = True) -> None:
         try:
-            from services.gguf_loader_service import GGUFLoaderService
-            service = GGUFLoaderService(gguf_path=gguf_path)
-            service.install(self.pipeline.model_ledger)
-            self._gguf_service = service
+            if per_layer_quant:
+                from services.gguf_quant_service import GGUFQuantLoaderService
+                service = GGUFQuantLoaderService(gguf_path=gguf_path)
+                service.install(self.pipeline.model_ledger)
+                self._gguf_service = service
+                import logging
+                logging.getLogger(__name__).info(
+                    "GGUF per-layer quant installed: weights stay compressed in VRAM (%s)", gguf_path
+                )
+            else:
+                from services.gguf_loader_service import GGUFLoaderService
+                service = GGUFLoaderService(gguf_path=gguf_path)
+                service.install(self.pipeline.model_ledger)
+                self._gguf_service = service
+                import logging
+                logging.getLogger(__name__).info(
+                    "GGUF load-time dequant installed (full BF16 in VRAM): %s", gguf_path
+                )
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning(
@@ -292,6 +310,30 @@ class LTXFastVideoPipeline:
         """
         return [1.0 - i / num_steps for i in range(num_steps + 1)]
 
+    @staticmethod
+    def _make_linearquadratic_sigmas(num_steps: int) -> list[float]:
+        """Return a LinearQuadratic sigma schedule.
+
+        First half of steps is linear (coarse, high-noise region); second half is
+        quadratic (fine, low-noise region).  The quadratic tail gives more step
+        budget to the low-noise refinement region than the plain linear schedule.
+        Params: threshold_noise=0.025, linear_steps=num_steps//2 (library defaults).
+        """
+        from ltx_core.components.schedulers import LinearQuadraticScheduler
+        return LinearQuadraticScheduler().execute(steps=num_steps).tolist()
+
+    @staticmethod
+    def _make_beta_sigmas(num_steps: int) -> list[float]:
+        """Return a Beta distribution sigma schedule (arXiv 2407.12173).
+
+        Samples timesteps according to a Beta(0.6, 0.6) distribution, producing
+        a bell-curve step density concentrated toward midrange noise levels.
+        May return fewer than num_steps+1 values due to deduplication of
+        identical timesteps — the Euler loop handles variable-length schedules.
+        """
+        from ltx_core.components.schedulers import BetaScheduler
+        return BetaScheduler().execute(steps=num_steps).tolist()
+
     def _run_inference(
         self,
         prompt: str,
@@ -306,6 +348,8 @@ class LTXFastVideoPipeline:
         stg_scale: float = 0.0,
         stg_block_index: int = 19,
         sigma_schedule: str = "distilled",
+        denoising_loop: str = "euler",
+        ge_gamma: float = 2.0,
     ) -> tuple[torch.Tensor | Iterator[torch.Tensor], AudioOrNone]:
         from ltx_pipelines.utils.args import ImageConditioningInput as _LtxImageInput
         import ltx_pipelines.distilled as _distilled_mod
@@ -321,13 +365,33 @@ class LTXFastVideoPipeline:
         # reads at call time.  Always restore in the finally block.
         _orig_sigmas = _distilled_mod.DISTILLED_SIGMA_VALUES
         _orig_simple = _distilled_mod.simple_denoising_func
+        _orig_euler = _distilled_mod.euler_denoising_loop
 
+        # ── Sigma schedule ───────────────────────────────────────────────────
         if sigma_schedule == "linear":
             _distilled_mod.DISTILLED_SIGMA_VALUES = self._make_linear_sigmas(num_steps)  # type: ignore[attr-defined]
+        elif sigma_schedule == "linear_quadratic":
+            _distilled_mod.DISTILLED_SIGMA_VALUES = self._make_linearquadratic_sigmas(num_steps)  # type: ignore[attr-defined]
+        elif sigma_schedule == "beta":
+            _distilled_mod.DISTILLED_SIGMA_VALUES = self._make_beta_sigmas(num_steps)  # type: ignore[attr-defined]
         elif num_steps < 8:
             _distilled_mod.DISTILLED_SIGMA_VALUES = self._make_sigma_subset(num_steps)  # type: ignore[attr-defined]
+
+        # ── STG guidance function ─────────────────────────────────────────────
         if stg_scale > 0.0:
             _distilled_mod.simple_denoising_func = self._make_stg_denoising_func(stg_scale, stg_block_index)  # type: ignore[attr-defined]
+
+        # ── Denoising loop ───────────────────────────────────────────────────
+        # "gradient_estimating" applies velocity correction across consecutive
+        # steps (paper: openreview.net/pdf?id=o2ND9v0CeK).  We patch the loop
+        # name in the distilled module so DistilledPipeline.__call__ picks it
+        # up — same LOAD_GLOBAL mechanism used for DISTILLED_SIGMA_VALUES above.
+        if denoising_loop == "gradient_estimating":
+            from functools import partial
+            from ltx_pipelines.utils.samplers import gradient_estimating_euler_denoising_loop
+            _distilled_mod.euler_denoising_loop = partial(  # type: ignore[attr-defined]
+                gradient_estimating_euler_denoising_loop, ge_gamma=ge_gamma
+            )
 
         try:
             return self.pipeline(
@@ -349,6 +413,7 @@ class LTXFastVideoPipeline:
             torch.cuda.synchronize()
             _distilled_mod.DISTILLED_SIGMA_VALUES = _orig_sigmas
             _distilled_mod.simple_denoising_func = _orig_simple
+            _distilled_mod.euler_denoising_loop = _orig_euler
 
     @torch.inference_mode()
     def generate(
@@ -365,6 +430,8 @@ class LTXFastVideoPipeline:
         stg_scale: float = 0.0,
         stg_block_index: int = 19,
         sigma_schedule: str = "distilled",
+        denoising_loop: str = "euler",
+        ge_gamma: float = 2.0,
     ) -> None:
         tiling_config = default_tiling_config(
             spatial_tile_size=self._vae_spatial_tile_size,
@@ -383,6 +450,8 @@ class LTXFastVideoPipeline:
             stg_scale=stg_scale,
             stg_block_index=stg_block_index,
             sigma_schedule=sigma_schedule,
+            denoising_loop=denoising_loop,
+            ge_gamma=ge_gamma,
         )
         chunks = video_chunks_number(num_frames, tiling_config)
         encode_video_output(video=video, audio=audio, fps=int(frame_rate), output_path=output_path, video_chunks_number_value=chunks)

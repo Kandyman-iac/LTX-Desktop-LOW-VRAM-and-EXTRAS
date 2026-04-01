@@ -409,6 +409,58 @@ export async function startPythonBackend(): Promise<void> {
   }
 }
 
+export async function restartPythonBackend(): Promise<void> {
+  // Broadcast immediately so the UI can show a spinner / reconnecting overlay
+  publishBackendHealthStatus({ status: 'restarting' })
+
+  // Save URL before stop clears it (the exit handler nulls backendUrl)
+  const savedUrl = backendUrl
+
+  // Request graceful shutdown from the Python server so uvicorn can drain
+  // in-flight requests before we kill the process
+  if (savedUrl) {
+    try {
+      const headers: Record<string, string> = {}
+      if (adminToken) headers['X-Admin-Token'] = adminToken
+      await fetch(`${savedUrl}/api/system/shutdown`, {
+        method: 'POST',
+        headers,
+        signal: AbortSignal.timeout(1500),
+      })
+    } catch {
+      // Best-effort — process may already be unresponsive or mid-generation
+    }
+  }
+
+  // Force-stop (SIGTERM now, SIGKILL at +5 s) so the port is definitely released
+  stopPythonBackend()
+
+  // Poll the health endpoint until it stops responding, then give the OS a
+  // moment to fully release the port before we bind again.
+  if (savedUrl) {
+    const healthUrl = `${savedUrl}/health`
+    const deadline = Date.now() + 10000
+    while (Date.now() < deadline) {
+      try {
+        await fetch(healthUrl, { signal: AbortSignal.timeout(400) })
+        // Still alive — wait and retry
+        await new Promise<void>(r => setTimeout(r, 500))
+      } catch {
+        // Connection refused / aborted — port is free
+        break
+      }
+    }
+  } else {
+    // Unknown URL — wait out the SIGTERM window
+    await new Promise<void>(r => setTimeout(r, 2000))
+  }
+
+  // Small buffer so the OS fully releases the port before the new bind
+  await new Promise<void>(r => setTimeout(r, 500))
+
+  await startPythonBackend()
+}
+
 export function stopPythonBackend(): void {
   if (pythonProcess) {
     isIntentionalShutdown = true

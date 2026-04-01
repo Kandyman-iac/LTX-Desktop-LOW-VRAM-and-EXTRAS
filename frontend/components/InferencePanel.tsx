@@ -366,11 +366,79 @@ export function InferencePanel({ overrides, defaults, onChange, disabled = false
                 />
               </div>
             )}
+
+            {/* Sigma Schedule */}
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs text-white">Sigma Schedule</label>
+                <p className="text-[10px] text-zinc-500">Step distribution — affects audio quality</p>
+              </div>
+              <select
+                value={gs.distilledSigmaSchedule ?? 'distilled'}
+                disabled={disabled}
+                onChange={(e) => updateSettings({ distilledSigmaSchedule: e.target.value })}
+                className="px-1.5 py-1 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+              >
+                <option value="distilled">LTX (default)</option>
+                <option value="linear">Linear</option>
+                <option value="linear_quadratic">Lin-Quad</option>
+                <option value="beta">Beta</option>
+              </select>
+            </div>
+
+            {/* Denoising Loop */}
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs text-white">Denoising Loop</label>
+                <p className="text-[10px] text-zinc-500">GE adds velocity correction per step</p>
+              </div>
+              <div className="flex gap-1 p-0.5 bg-zinc-900 border border-zinc-700 rounded-lg">
+                {(['euler', 'gradient_estimating'] as const).map(l => (
+                  <button
+                    key={l}
+                    disabled={disabled}
+                    onClick={() => updateSettings({ denoisingLoop: l })}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors disabled:opacity-50 ${
+                      (gs.denoisingLoop ?? 'euler') === l
+                        ? 'bg-green-600 text-white'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {l === 'euler' ? 'Euler (def)' : 'GE'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* GE Gamma — only when GE loop active */}
+            {(gs.denoisingLoop ?? 'euler') === 'gradient_estimating' && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs text-zinc-300">GE Gamma</label>
+                  <p className="text-[10px] text-zinc-500">Correction strength (default 2.0)</p>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.1}
+                  value={gs.geGamma ?? 2.0}
+                  disabled={disabled}
+                  onChange={(e) => {
+                    const v = Math.max(0, Math.min(10, parseFloat(e.target.value) || 2.0))
+                    updateSettings({ geGamma: v })
+                  }}
+                  className="w-14 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                />
+              </div>
+            )}
           </div>
 
           <p className="text-[10px] text-zinc-500">
             {overrides.numSteps} steps
             {overrides.stgScale > 0 ? `, STG ${overrides.stgScale} (block ${overrides.stgBlockIndex})` : ''}
+            {(gs.distilledSigmaSchedule ?? 'distilled') !== 'distilled' ? `, σ:${gs.distilledSigmaSchedule}` : ''}
+            {(gs.denoisingLoop ?? 'euler') !== 'euler' ? `, GE γ=${gs.geGamma ?? 2.0}` : ''}
           </p>
         </div>
 
@@ -476,6 +544,22 @@ export function InferencePanel({ overrides, defaults, onChange, disabled = false
                     className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded-lg text-[10px] text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
+
+                {/* GGUF Per-Layer Quant */}
+                {gs.ggufTransformerPath && (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs text-white">GGUF: Keep compressed in VRAM</label>
+                      <p className="text-[10px] text-zinc-400">ON = weights stay quantised (less VRAM). OFF = dequant at load (more VRAM, faster inference).</p>
+                    </div>
+                    <button
+                      onClick={() => updateSettings({ ...gs, ggufPerLayerQuant: !(gs.ggufPerLayerQuant ?? true) })}
+                      className={`ml-2 flex-shrink-0 w-10 h-5 rounded-full transition-colors ${(gs.ggufPerLayerQuant ?? true) ? 'bg-amber-500' : 'bg-zinc-600'}`}
+                    >
+                      <span className={`block w-4 h-4 rounded-full bg-white shadow transition-transform mx-0.5 ${(gs.ggufPerLayerQuant ?? true) ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                )}
 
                 {/* VAE Tiling */}
                 <div className="space-y-1.5 pt-2 border-t border-zinc-700">

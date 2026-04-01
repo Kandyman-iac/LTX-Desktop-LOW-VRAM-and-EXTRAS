@@ -157,6 +157,77 @@ Controls how many distillation steps the model runs per generation. The LTX-Vide
 
 More steps beyond 8 are not meaningful — the distilled model is not designed for high step counts. For full-quality generation, 4 steps is generally the sweet spot.
 
+### Sigma schedule (audio crunch fix)
+
+Controls how denoising steps are distributed across the noise level range during generation. Affects both video and audio quality, but the audible impact is more pronounced.
+
+**Setting:** `distilledSigmaSchedule` — `"distilled"` (default), `"linear"`, `"linear_quadratic"`, or `"beta"`
+
+| Schedule | Behaviour | When to use |
+| --- | --- | --- |
+| `distilled` | LTX-native compressed schedule — clusters steps near σ=1.0 | Default; fastest convergence |
+| `linear` | Evenly-spaced steps from σ=1.0 → 0.0 | When audio sounds metallic, crunchy, or artificially compressed |
+| `linear_quadratic` | Linear first-half + quadratic second-half — more refinement budget at low noise | Cleaner audio than linear with similar video quality; good starting point after `linear` |
+| `beta` | Beta(0.6, 0.6) distribution — bell-curve density concentrated at midrange σ | Experimental; may deduplicate steps at very low step counts |
+
+**Why this matters for audio:**
+
+The distilled schedule front-loads denoising effort into the high-noise (σ≈1.0) region:
+
+```
+distilled: [1.0, 0.994, 0.988, 0.981, 0.975, 0.909, 0.725, 0.422, 0.0]
+           |←─── 5 steps here ───→|       |← 2 →|     |← 1 →|
+```
+
+This leaves very few refinement passes in the low-noise region (σ < 0.5) where perceptual audio quality is determined — producing the characteristic metallic crunch on the native LTX audio track.
+
+The linear schedule redistributes the same number of steps evenly:
+
+```
+linear:    [1.0, 0.875, 0.75, 0.625, 0.5, 0.375, 0.25, 0.125, 0.0]
+           |←────────────── equal spacing throughout ──────────────→|
+```
+
+More refinement passes at low noise levels = cleaner, less compressed-sounding audio.
+
+**Notes:**
+- All schedules apply to Stage 1 (main generation); Stage 2 (upsampler refinement) always uses its own fixed 4-step schedule
+- Video quality impact is minimal across schedules; the difference is most audible in the generated audio track
+- If audio still sounds crunchy on `linear`, increase inference steps (6–8) or try `linear_quadratic`
+
+**linear_quadratic detail:**
+
+First `steps//2` are linear (fast, coarse — σ near 1.0); remaining steps follow a quadratic curve toward 0. This concentrates more passes in the perceptually critical low-noise region than plain linear.
+
+**beta detail:**
+
+Samples timesteps from a Beta(α=0.6, β=0.6) distribution, mapping them through the flux time-shift function (shift=2.37). The result is a bell-curve distribution that allocates more steps to midrange noise levels (σ≈0.3–0.7). At low step counts (≤4), duplicate timesteps may be collapsed — the loop handles variable-length schedules correctly.
+
+---
+
+### Denoising loop
+
+Controls the sampler algorithm used at each denoising step within the Euler loop.
+
+**Setting:** `denoisingLoop` — `"euler"` (default) or `"gradient_estimating"`
+
+| Loop | Behaviour | When to use |
+| --- | --- | --- |
+| `euler` | Standard first-order Euler update | Default; fast, stable |
+| `gradient_estimating` | Applies velocity correction using the delta between consecutive step predictions | When motion feels jittery or temporally inconsistent across frames |
+
+**Additional setting:** `geGamma` (float, default `2.0`) — gradient correction strength for `gradient_estimating`. Range 0–10.
+
+- Higher `geGamma` = stronger correction; may over-smooth motion or cause saturation artefacts above ~4.0
+- `geGamma=0.0` degrades to standard Euler (correction term zeroes out)
+- The GE loop skips correction on the final step (σ_next=0) — same as Euler for the last pass
+
+The `denoisingLoop` setting is **orthogonal to** `distilledSigmaSchedule` — any combination is valid (e.g. `beta` sigmas + `gradient_estimating` loop).
+
+Paper: [Gradient Estimating Sampler — openreview.net/pdf?id=o2ND9v0CeK](https://openreview.net/pdf?id=o2ND9v0CeK)
+
+---
+
 ### STG (Spatio-Temporal Guidance)
 
 Spatio-Temporal Guidance is a classifier-free guidance variant applied at a specific transformer block. It influences the balance between motion coherence and prompt adherence.

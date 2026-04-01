@@ -36,6 +36,8 @@ class LTXDevVideoPipeline:
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
         loras: list[LoraEntry] | None = None,
+        gguf_transformer_path: str = "",
+        gguf_per_layer_quant: bool = True,
     ) -> "LTXDevVideoPipeline":
         return LTXDevVideoPipeline(
             checkpoint_path=checkpoint_path,
@@ -50,6 +52,8 @@ class LTXDevVideoPipeline:
             vae_spatial_tile_size=vae_spatial_tile_size,
             vae_temporal_tile_size=vae_temporal_tile_size,
             loras=loras,
+            gguf_transformer_path=gguf_transformer_path,
+            gguf_per_layer_quant=gguf_per_layer_quant,
         )
 
     def __init__(
@@ -66,6 +70,8 @@ class LTXDevVideoPipeline:
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
         loras: list[LoraEntry] | None = None,
+        gguf_transformer_path: str = "",
+        gguf_per_layer_quant: bool = True,
     ) -> None:
         from ltx_core.quantization import QuantizationPolicy
         from ltx_pipelines import TI2VidTwoStagesPipeline
@@ -88,6 +94,11 @@ class LTXDevVideoPipeline:
             quantization=QuantizationPolicy.fp8_cast() if use_fp8 else None,
         )
 
+        # GGUF must be installed first — it replaces transformer_builder on both
+        # stage ledgers before any other service wraps the transformer() callable.
+        if gguf_transformer_path:
+            self._install_gguf(gguf_transformer_path, per_layer_quant=gguf_per_layer_quant)
+
         if block_swap_blocks_on_gpu > 0:
             self._install_block_swap(block_swap_blocks_on_gpu)
 
@@ -97,24 +108,53 @@ class LTXDevVideoPipeline:
         if loras:
             self._install_loras(loras)
 
+    def _install_gguf(self, gguf_path: str, per_layer_quant: bool = True) -> None:
+        """Install GGUF transformer on both stage ledgers.
+
+        TI2VidTwoStagesPipeline uses stage_1_model_ledger for the main denoising pass
+        and stage_2_model_ledger (derived from stage 1 via with_loras) for the
+        refinement pass.  Both share the same underlying 22B checkpoint so both need
+        the same loader.
+
+        per_layer_quant=True (default): weights stay compressed in VRAM, dequantised
+        one layer at a time during the forward pass — significantly lower VRAM.
+        per_layer_quant=False: dequantise everything at load time → full BF16 in VRAM.
+        """
+        try:
+            if per_layer_quant:
+                from services.gguf_quant_service import GGUFQuantLoaderService
+                svc_cls = GGUFQuantLoaderService
+                mode = "per-layer quant (VRAM-efficient)"
+            else:
+                from services.gguf_loader_service import GGUFLoaderService
+                svc_cls = GGUFLoaderService
+                mode = "load-time dequant (full BF16 VRAM)"
+
+            service1 = svc_cls(gguf_path=gguf_path)
+            service1.install(self.pipeline.stage_1_model_ledger)
+            service2 = svc_cls(gguf_path=gguf_path)
+            service2.install(self.pipeline.stage_2_model_ledger)
+            self._gguf_service = (service1, service2)
+            _log.info("GGUF %s installed on dev pipeline (both stages): %s", mode, gguf_path)
+        except Exception as exc:
+            _log.warning("GGUF install failed on dev pipeline (%s)", exc)
+
     def _install_block_swap(self, blocks_on_gpu: int) -> None:
         try:
-            if not hasattr(self.pipeline, "model_ledger"):
-                _log.warning("BlockSwap: TI2VidTwoStagesPipeline has no model_ledger — skipping")
-                return
+            ledger = self.pipeline.stage_1_model_ledger
             from services.block_swap_service import BlockSwapService
             service = BlockSwapService(
                 blocks_on_gpu=blocks_on_gpu,
                 device=self._transformer_device,
             )
-            original_transformer = self.pipeline.model_ledger.transformer
+            original_transformer = ledger.transformer
 
             def patched_transformer() -> torch.nn.Module:
                 t = original_transformer()
                 service.install(t)
                 return t
 
-            self.pipeline.model_ledger.transformer = patched_transformer
+            ledger.transformer = patched_transformer
             self._block_swap_service = service
             _log.info("BlockSwap configured: %d blocks on GPU", blocks_on_gpu)
         except Exception as exc:
@@ -132,23 +172,21 @@ class LTXDevVideoPipeline:
 
     def _install_loras(self, entries: list[LoraEntry]) -> None:
         try:
-            if not hasattr(self.pipeline, "model_ledger"):
-                _log.warning("LoRA: TI2VidTwoStagesPipeline has no model_ledger — skipping")
-                return
+            ledger = self.pipeline.stage_1_model_ledger
             from services.lora_service import LoraService
             service = LoraService(device=self._transformer_device)
             loaded = service.load_loras(entries)
             if not loaded:
                 _log.warning("No LoRAs were successfully loaded")
                 return
-            _original_transformer_fn = self.pipeline.model_ledger.transformer
+            _original_transformer_fn = ledger.transformer
 
             def _transformer_with_loras() -> torch.nn.Module:
                 t = _original_transformer_fn()
                 service.apply_hooks_to_transformer(t, loaded)
                 return t
 
-            self.pipeline.model_ledger.transformer = _transformer_with_loras
+            ledger.transformer = _transformer_with_loras
             _log.info("LoRAs applied: %d loaded", len(loaded))
         except Exception as exc:
             _log.warning("LoRA install failed (%s)", exc)
@@ -287,12 +325,10 @@ class LTXDevVideoPipeline:
                 os.unlink(output_path)
 
     def compile_transformer(self) -> None:
-        if not hasattr(self.pipeline, "model_ledger"):
-            _log.warning("compile_transformer: TI2VidTwoStagesPipeline has no model_ledger — skipping")
-            return
-        transformer = self.pipeline.model_ledger.transformer()
+        ledger = self.pipeline.stage_1_model_ledger
+        transformer = ledger.transformer()
         compiled = cast(
             torch.nn.Module,
             torch.compile(transformer, mode="reduce-overhead", fullgraph=False),
         )
-        setattr(self.pipeline.model_ledger, "transformer", lambda: compiled)
+        setattr(ledger, "transformer", lambda: compiled)

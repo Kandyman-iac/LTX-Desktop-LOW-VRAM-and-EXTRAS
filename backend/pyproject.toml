@@ -28,6 +28,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "triton-windows; sys_platform == 'win32'",
     "triton; sys_platform == 'linux'",
+    "gguf>=0.10.0",
 ]
 
 [[tool.uv.index]]

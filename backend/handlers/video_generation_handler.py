@@ -265,6 +265,8 @@ class VideoGenerationHandler(StateHandlerBase):
         eff_stg_scale = stg_scale_override if stg_scale_override is not None else settings.stg_scale
         eff_stg_block_index = stg_block_index_override if stg_block_index_override is not None else settings.stg_block_index
         sigma_schedule = settings.distilled_sigma_schedule
+        denoising_loop = settings.denoising_loop
+        ge_gamma = settings.ge_gamma
 
         # OOM prevention: force pipeline eviction every N completions so
         # VRAM fragmentation doesn't accumulate across generations.
@@ -316,7 +318,7 @@ class VideoGenerationHandler(StateHandlerBase):
             height = round(height / 64) * 64
             width = round(width / 64) * 64
 
-            logger.info("[%s] Inference params: steps=%d stg_scale=%.2f stg_block=%d sigma_schedule=%s", gen_mode, total_steps, eff_stg_scale, eff_stg_block_index, sigma_schedule)
+            logger.info("[%s] Inference params: steps=%d stg_scale=%.2f stg_block=%d sigma_schedule=%s denoising_loop=%s ge_gamma=%.2f", gen_mode, total_steps, eff_stg_scale, eff_stg_block_index, sigma_schedule, denoising_loop, ge_gamma)
             t_inference_start = time.perf_counter()
             pipeline_state.pipeline.generate(
                 prompt=enhanced_prompt,
@@ -331,6 +333,8 @@ class VideoGenerationHandler(StateHandlerBase):
                 stg_scale=eff_stg_scale,
                 stg_block_index=eff_stg_block_index,
                 sigma_schedule=sigma_schedule,
+                denoising_loop=denoising_loop,
+                ge_gamma=ge_gamma,
             )
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)

@@ -86,6 +86,7 @@ class PipelinesHandler(StateHandlerBase):
             s.attention_tile_size,
             s.use_fp8_transformer,
             s.gguf_transformer_path,
+            s.gguf_per_layer_quant,
             s.vae_spatial_tile_size,
             s.vae_temporal_tile_size,
             s.use_multi_gpu,
@@ -229,6 +230,7 @@ class PipelinesHandler(StateHandlerBase):
             attention_tile_size=settings.attention_tile_size,
             use_fp8_transformer=settings.use_fp8_transformer,
             gguf_transformer_path=settings.gguf_transformer_path,
+            gguf_per_layer_quant=getattr(settings, 'gguf_per_layer_quant', True),
             vae_spatial_tile_size=settings.vae_spatial_tile_size,
             vae_temporal_tile_size=settings.vae_temporal_tile_size,
             pre_quantized_transformer_path=fp8_pre_quantized,
@@ -256,6 +258,14 @@ class PipelinesHandler(StateHandlerBase):
                 f"Please download it via the Model Status menu."
             )
 
+        gguf_path = settings.gguf_transformer_path or ""
+        gguf_per_layer = getattr(settings, 'gguf_per_layer_quant', True)
+        if gguf_path:
+            logger.info(
+                "Dev pipeline: GGUF transformer from %s (per_layer_quant=%s)",
+                gguf_path, gguf_per_layer,
+            )
+
         logger.info("Creating dev (two-stage) pipeline from checkpoint: %s", checkpoint_path)
         return LTXDevVideoPipeline.create(
             checkpoint_path=checkpoint_path,
@@ -270,6 +280,8 @@ class PipelinesHandler(StateHandlerBase):
             vae_spatial_tile_size=settings.vae_spatial_tile_size,
             vae_temporal_tile_size=settings.vae_temporal_tile_size,
             loras=lora_entries or None,
+            gguf_transformer_path=gguf_path,
+            gguf_per_layer_quant=gguf_per_layer,
         )
 
     def unload_gpu_pipeline(self) -> None:

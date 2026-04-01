@@ -430,6 +430,17 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     window.electronAPI.setAnalyticsEnabled(next).catch(() => {})
   }
 
+  // Backend restart handler
+  const [backendRestarting, setBackendRestarting] = useState(false)
+  const handleRestartBackend = async () => {
+    setBackendRestarting(true)
+    try {
+      await window.electronAPI.restartPythonBackend()
+    } finally {
+      setBackendRestarting(false)
+    }
+  }
+
   // Seed handlers
   const handleToggleSeedLock = () => {
     onSettingsChange({
@@ -960,6 +971,49 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 </div>
 
               </div>
+
+              {/* Backend Controls */}
+              <div className="space-y-3 pt-4 border-t border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <svg className="h-4 w-4 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                    <line x1="12" y1="2" x2="12" y2="12" />
+                  </svg>
+                  <h3 className="text-sm font-semibold text-white">Backend</h3>
+                </div>
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <label className="text-sm text-white">Restart Backend</label>
+                    <p className="text-xs text-zinc-500 leading-relaxed mt-0.5">
+                      Restarts the Python process. Use if generation hangs, VRAM gets stuck, or after changing settings that require a full reload.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleRestartBackend}
+                    disabled={backendRestarting}
+                    className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 bg-red-900/40 hover:bg-red-900/60 disabled:opacity-50 disabled:cursor-not-allowed border border-red-800/60 rounded-lg text-xs text-red-300 font-medium transition-colors"
+                  >
+                    {backendRestarting ? (
+                      <>
+                        <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                        </svg>
+                        Restarting…
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                          <path d="M3 3v5h5" />
+                        </svg>
+                        Restart
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
             </>
           )}
 
@@ -1229,24 +1283,64 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-sm text-white">Sigma Schedule</label>
-                      <p className="text-xs text-zinc-500">Linear distributes steps evenly — community-reported to reduce native audio artifacts</p>
+                      <p className="text-xs text-zinc-500">Controls step distribution — Linear/LQ/Beta reduce native audio crunch</p>
+                    </div>
+                    <select
+                      value={settings.distilledSigmaSchedule ?? 'distilled'}
+                      onChange={(e) => onSettingsChange({ ...settings, distilledSigmaSchedule: e.target.value })}
+                      className="px-2 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="distilled">LTX (default)</option>
+                      <option value="linear">Linear</option>
+                      <option value="linear_quadratic">Linear-Quadratic</option>
+                      <option value="beta">Beta</option>
+                    </select>
+                  </div>
+
+                  {/* Denoising Loop */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-white">Denoising Loop</label>
+                      <p className="text-xs text-zinc-500">GE adds velocity correction — may improve temporal consistency</p>
                     </div>
                     <div className="flex gap-1 p-0.5 bg-zinc-900 border border-zinc-700 rounded-lg">
-                      {(['distilled', 'linear'] as const).map(s => (
+                      {(['euler', 'gradient_estimating'] as const).map(l => (
                         <button
-                          key={s}
-                          onClick={() => onSettingsChange({ ...settings, distilledSigmaSchedule: s })}
+                          key={l}
+                          onClick={() => onSettingsChange({ ...settings, denoisingLoop: l })}
                           className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                            (settings.distilledSigmaSchedule ?? 'distilled') === s
+                            (settings.denoisingLoop ?? 'euler') === l
                               ? 'bg-green-600 text-white'
                               : 'text-zinc-400 hover:text-white'
                           }`}
                         >
-                          {s === 'distilled' ? 'LTX' : 'Linear'}
+                          {l === 'euler' ? 'Euler (default)' : 'GE'}
                         </button>
                       ))}
                     </div>
                   </div>
+
+                  {/* GE Gamma — only when GE loop active */}
+                  {(settings.denoisingLoop ?? 'euler') === 'gradient_estimating' && (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm text-zinc-300">GE Gamma</label>
+                        <p className="text-xs text-zinc-500">Correction strength (default 2.0; range 0–10)</p>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        value={settings.geGamma ?? 2.0}
+                        onChange={(e) => {
+                          const v = Math.max(0, Math.min(10, parseFloat(e.target.value) || 2.0))
+                          onSettingsChange({ ...settings, geGamma: v })
+                        }}
+                        className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
+                      />
+                    </div>
+                  )}
 
                   {/* Upscaler Toggle */}
                   <div className="flex items-center justify-between">
@@ -1273,7 +1367,8 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 <div className="text-xs text-zinc-500">
                   Current: {settings.distilledNumSteps ?? 8} steps
                   {(settings.stgScale ?? 0) > 0 ? `, STG ${settings.stgScale} (block ${settings.stgBlockIndex ?? 19})` : ''}
-                  {', '}{(settings.distilledSigmaSchedule ?? 'distilled') === 'linear' ? 'linear σ' : 'LTX σ'}
+                  {', σ:'}{settings.distilledSigmaSchedule ?? 'distilled'}
+                  {(settings.denoisingLoop ?? 'euler') !== 'euler' ? `, GE γ=${settings.geGamma ?? 2.0}` : ''}
                   {', '}{settings.fastModel?.useUpscaler !== false ? 'with upscaler' : 'native resolution'}
                 </div>
               </div>

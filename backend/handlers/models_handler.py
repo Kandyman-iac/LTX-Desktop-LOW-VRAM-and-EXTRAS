@@ -103,7 +103,8 @@ class ModelsHandler(StateHandlerBase):
             ))
 
         # ── Fast GGUF variants (one per .gguf file in models dir) ──────
-        for gguf_file in sorted(d.glob("*.gguf")):
+        gguf_files = sorted(d.glob("*.gguf"))
+        for gguf_file in gguf_files:
             stem = gguf_file.stem
             # Parse quantisation tag from filename (e.g. "...-Q8_0" → "Q8_0")
             quant = stem.rsplit("-", 1)[-1].upper() if "-" in stem else stem.upper()
@@ -136,6 +137,24 @@ class ModelsHandler(StateHandlerBase):
             use_fp8=False,
             size_gb=round(_gb(distilled) + _gb(distilled_lora), 1) if dev_available else None,
         ))
+
+        # ── Dev GGUF variants (dev pipeline + GGUF transformer) ────────
+        for gguf_file in gguf_files:
+            stem = gguf_file.stem
+            quant = stem.rsplit("-", 1)[-1].upper() if "-" in stem else stem.upper()
+            variants.append(CheckpointVariant(
+                id=f"dev-gguf-{quant.lower()}",
+                label=f"Dev — GGUF {quant} (CFG + LoRA)",
+                description=(
+                    f"Two-stage dev pipeline with GGUF {quant} transformer. "
+                    f"Real CFG + STG, smaller GGUF file. Requires distilled LoRA."
+                ),
+                available=dev_available,
+                pipeline_type="dev",
+                gguf_path=str(gguf_file),
+                use_fp8=False,
+                size_gb=round(_gb(gguf_file) + _gb(distilled_lora), 1) if dev_available else None,
+            ))
 
         return variants
 

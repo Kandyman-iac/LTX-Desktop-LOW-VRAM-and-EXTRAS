@@ -28,6 +28,8 @@ class DevVideoPipeline(Protocol):
         vae_spatial_tile_size: int = 0,
         vae_temporal_tile_size: int = 0,
         loras: "list[LoraEntry] | None" = None,
+        gguf_transformer_path: str = "",
+        gguf_per_layer_quant: bool = True,
     ) -> "DevVideoPipeline":
         ...
 

@@ -35,6 +35,7 @@ export interface AppSettings {
   transformerDevice: string
   useMultiGpu: boolean
   ggufTransformerPath: string
+  ggufPerLayerQuant: boolean
   useAbliteratedEncoder: boolean
   civitaiLoras: string
   vaeSpatialTileSize: number
@@ -46,6 +47,8 @@ export interface AppSettings {
   stgScale: number
   stgBlockIndex: number
   distilledSigmaSchedule: string
+  denoisingLoop: string
+  geGamma: number
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -71,6 +74,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   transformerDevice: '',
   useMultiGpu: false,
   ggufTransformerPath: '',
+  ggufPerLayerQuant: true,
   useAbliteratedEncoder: false,
   civitaiLoras: '[]',
   vaeSpatialTileSize: 0,
@@ -82,6 +86,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   stgScale: 0,
   stgBlockIndex: 28,
   distilledSigmaSchedule: 'distilled',
+  denoisingLoop: 'euler',
+  geGamma: 2.0,
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -137,6 +143,7 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     transformerDevice: data.transformerDevice ?? DEFAULT_APP_SETTINGS.transformerDevice,
     useMultiGpu: data.useMultiGpu ?? DEFAULT_APP_SETTINGS.useMultiGpu,
     ggufTransformerPath: data.ggufTransformerPath ?? DEFAULT_APP_SETTINGS.ggufTransformerPath,
+    ggufPerLayerQuant: data.ggufPerLayerQuant ?? DEFAULT_APP_SETTINGS.ggufPerLayerQuant,
     useAbliteratedEncoder: data.useAbliteratedEncoder ?? DEFAULT_APP_SETTINGS.useAbliteratedEncoder,
     civitaiLoras: data.civitaiLoras ?? DEFAULT_APP_SETTINGS.civitaiLoras,
     vaeSpatialTileSize: data.vaeSpatialTileSize ?? DEFAULT_APP_SETTINGS.vaeSpatialTileSize,
@@ -148,6 +155,8 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     stgScale: data.stgScale ?? DEFAULT_APP_SETTINGS.stgScale,
     stgBlockIndex: data.stgBlockIndex ?? DEFAULT_APP_SETTINGS.stgBlockIndex,
     distilledSigmaSchedule: data.distilledSigmaSchedule ?? DEFAULT_APP_SETTINGS.distilledSigmaSchedule,
+    denoisingLoop: data.denoisingLoop ?? DEFAULT_APP_SETTINGS.denoisingLoop,
+    geGamma: data.geGamma ?? DEFAULT_APP_SETTINGS.geGamma,
   }
 }
 

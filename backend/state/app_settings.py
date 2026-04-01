@@ -84,6 +84,7 @@ class AppSettings(SettingsBaseModel):
     transformer_device: str = ""
     civitai_loras: str = "[]"
     gguf_transformer_path: str = ""
+    gguf_per_layer_quant: bool = True  # True = weights compressed in VRAM (lower VRAM); False = dequant at load (higher VRAM, faster first-load)
     use_abliterated_encoder: bool = False
     use_multi_gpu: bool = False
     # VAE tiling (0 = use library defaults: 512px spatial, 64 frames temporal)
@@ -109,10 +110,21 @@ class AppSettings(SettingsBaseModel):
     # Block 28 is the community-recommended default for 22B. Does nothing when stg_scale=0.
     stg_block_index: int = 28
     # Sigma schedule for the distilled pipeline denoising loop.
-    # "distilled" = LTX-native compressed schedule (default).
-    # "linear"    = evenly-spaced sigmas from 1.0→0.0, community-reported to reduce
-    #               metallic audio artifacts on the native LTX audio track.
+    # "distilled"        = LTX-native compressed schedule (default).
+    # "linear"           = evenly-spaced sigmas 1.0→0.0; reduces metallic audio artifacts.
+    # "linear_quadratic" = linear early steps + quadratic late steps; finer low-noise
+    #                      refinement budget (threshold_noise=0.025, linear half).
+    # "beta"             = beta-distribution sampling (arXiv 2407.12173); bell-curve
+    #                      step density weighted toward midrange noise. alpha=beta=0.6.
     distilled_sigma_schedule: str = "distilled"
+    # Denoising loop algorithm for the distilled pipeline.
+    # "euler"               = standard first-order Euler sampler (default).
+    # "gradient_estimating" = velocity correction across consecutive steps; can improve
+    #                         temporal consistency (paper: openreview.net/pdf?id=o2ND9v0CeK).
+    denoising_loop: str = "euler"
+    # Gradient correction strength. Only used when denoising_loop="gradient_estimating".
+    # Default 2.0 (paper default). Higher = stronger correction; may over-smooth motion.
+    ge_gamma: float = 2.0
 
     @field_validator("block_swap_blocks_on_gpu", mode="before")
     @classmethod
@@ -155,6 +167,13 @@ class AppSettings(SettingsBaseModel):
     @classmethod
     def _clamp_stg_block_index(cls, value: Any) -> int:
         return _clamp_int(value, minimum=0, maximum=47, default=28)
+
+    @field_validator("ge_gamma", mode="before")
+    @classmethod
+    def _clamp_ge_gamma(cls, value: Any) -> float:
+        if value is None:
+            return 2.0
+        return max(0.0, min(10.0, float(value)))
 
 
 SettingsModelT = TypeVar("SettingsModelT", bound=SettingsBaseModel)
@@ -226,6 +245,7 @@ class SettingsResponse(SettingsBaseModel):
     transformer_device: str = ""
     civitai_loras: str = "[]"
     gguf_transformer_path: str = ""
+    gguf_per_layer_quant: bool = True
     use_abliterated_encoder: bool = False
     use_multi_gpu: bool = False
     vae_spatial_tile_size: int = 0
@@ -237,6 +257,8 @@ class SettingsResponse(SettingsBaseModel):
     stg_scale: float = 0.0
     stg_block_index: int = 28
     distilled_sigma_schedule: str = "distilled"
+    denoising_loop: str = "euler"
+    ge_gamma: float = 2.0
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:
