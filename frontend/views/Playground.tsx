@@ -25,9 +25,11 @@ import { RetakePanel } from '../components/RetakePanel'
 import { ICLoraPanel, CONDITIONING_TYPES, type ICLoraConditioningType } from '../components/ICLoraPanel'
 import { MagiPanel, type MagiPanelState } from '../components/MagiPanel'
 import { AddAudioPanel, type AddAudioPanelState } from '../components/AddAudioPanel'
+import { QwenTTSPanel, type QwenTTSPanelState } from '../components/QwenTTSPanel'
 import { InferencePanel, type InferenceOverrides } from '../components/InferencePanel'
 import { useMMAudio } from '../hooks/use-mmaudio'
 import { usePrismAudio } from '../hooks/use-prismaudio'
+import { useQwenTTS } from '../hooks/use-qwentts'
 import { useGenerationHistory, type HistoryEntry } from '../hooks/use-generation-history'
 import { useEncodePrompt } from '../hooks/use-encode-prompt'
 import { useEnhancePrompt } from '../hooks/use-enhance-prompt'
@@ -174,6 +176,7 @@ export function Playground() {
   // Handle mode change
   const handleModeChange = (newMode: GenerationMode) => {
     if (newMode !== 'add-audio') { mmAudioReset(); prismAudioReset() }
+    if (newMode !== 'tts') { ttsReset() }
     setMode(newMode)
   }
   const {
@@ -314,6 +317,13 @@ export function Playground() {
   // Add Audio mode
   const { state: mmAudioState, generate: mmAudioGenerate, cancel: mmAudioCancel, reset: mmAudioReset } = useMMAudio()
   const { state: prismAudioState, generate: prismAudioGenerate, cancel: prismAudioCancel, reset: prismAudioReset } = usePrismAudio()
+
+  // TTS mode
+  const { state: ttsState, generate: ttsGenerate, cancel: ttsCancel, reset: ttsReset } = useQwenTTS()
+  const [ttsInput, setTtsInput] = useState<QwenTTSPanelState>({
+    text: '', language: 'English', mode: 'custom_voice', speaker: 'Ryan',
+    instruct: '', refAudioPath: null, refText: '', modelSize: '1.7b', ready: false,
+  })
   const [addAudioInput, setAddAudioInput] = useState<AddAudioPanelState>({
     videoPath: null, videoUrl: null, engine: 'mmaudio', prompt: '',
     negativePrompt: '', seed: null, cfgStrength: 4.5, numSteps: 25, ready: false,
@@ -338,6 +348,21 @@ export function Playground() {
         gpus: magiInput.gpus,
         seed: magiInput.seed,
         sr: magiInput.sr,
+      })
+      return
+    }
+
+    if (mode === 'tts') {
+      if (!ttsInput.ready) return
+      void ttsGenerate({
+        text: ttsInput.text,
+        language: ttsInput.language,
+        mode: ttsInput.mode,
+        speaker: ttsInput.speaker,
+        instruct: ttsInput.instruct,
+        refAudioPath: ttsInput.refAudioPath,
+        refText: ttsInput.refText,
+        modelSize: ttsInput.modelSize,
       })
       return
     }
@@ -481,10 +506,11 @@ export function Playground() {
   const isIcLoraMode = mode === 'ic-lora'
   const isMagiMode = mode === 'magi-human'
   const isAddAudioMode = mode === 'add-audio'
+  const isTTSMode = mode === 'tts'
   const isVideoMode = mode === 'text-to-video' || mode === 'image-to-video'
   const isAddAudioBusy = addAudioState.status === 'running'
-  const isBusy = isRetakeMode ? isRetaking : isIcLoraMode ? isIcLoraGenerating : isMagiMode ? isMagiGenerating : isAddAudioMode ? isAddAudioBusy : isGenerating
-  const canGenerate = (isMagiMode || isAddAudioMode || processStatus === 'alive') && !isBusy && (
+  const isBusy = isRetakeMode ? isRetaking : isIcLoraMode ? isIcLoraGenerating : isMagiMode ? isMagiGenerating : isAddAudioMode ? isAddAudioBusy : isTTSMode ? ttsState.status === 'running' : isGenerating
+  const canGenerate = (isMagiMode || isAddAudioMode || isTTSMode || processStatus === 'alive') && !isBusy && (
     isRetakeMode
       ? retakeInput.ready && !!retakeInput.videoPath
       : isIcLoraMode
@@ -493,7 +519,9 @@ export function Playground() {
           ? magiInput.ready && !!magiInput.imagePath && !!prompt.trim()
           : isAddAudioMode
             ? addAudioInput.ready
-            : !!prompt.trim()
+            : isTTSMode
+              ? ttsInput.ready
+              : !!prompt.trim()
   )
 
   return (
@@ -586,6 +614,14 @@ export function Playground() {
                 isProcessing={isAddAudioBusy}
                 audioState={addAudioState}
                 onChange={setAddAudioInput}
+              />
+            )}
+
+            {isTTSMode && (
+              <QwenTTSPanel
+                isProcessing={ttsState.status === 'running'}
+                ttsState={ttsState}
+                onChange={setTtsInput}
               />
             )}
 
@@ -980,7 +1016,15 @@ export function Playground() {
                 </Button>
               )}
 
-              {isAddAudioBusy ? (
+              {ttsState.status === 'running' ? (
+                <Button
+                  onClick={() => ttsCancel()}
+                  className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white"
+                >
+                  <Square className="h-4 w-4" />
+                  Stop TTS
+                </Button>
+              ) : isAddAudioBusy ? (
                 <Button
                   onClick={() => addAudioInput.engine === 'mmaudio' ? mmAudioCancel() : prismAudioCancel()}
                   className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white"

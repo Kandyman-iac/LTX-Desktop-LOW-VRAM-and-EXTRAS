@@ -400,3 +400,26 @@ class PrismAudioProgressResponse(BaseModel):
     output_path: str | None = None
     error: str | None = None
     log_tail: str = ""
+
+
+# ============================================================
+# Qwen3-TTS request / response types
+# ============================================================
+
+
+class QwenTTSGenerateRequest(BaseModel):
+    text: str                               # Text to synthesise
+    language: str = "English"               # e.g. "English", "Chinese", "Japanese"
+    mode: str = "custom_voice"              # "custom_voice" | "voice_clone"
+    speaker: str = "Ryan"                   # CustomVoice preset speaker name
+    instruct: str = ""                      # Optional style instruction (CustomVoice)
+    ref_audio_path: str | None = None       # Filesystem path to reference WAV (voice_clone)
+    ref_text: str = ""                      # Transcript of reference audio (voice_clone)
+    model_size: str = "1.7b"               # "1.7b" | "0.6b"
+
+
+class QwenTTSProgressResponse(BaseModel):
+    status: str                             # idle | running | complete | error | cancelled
+    output_path: str | None = None
+    error: str | None = None
+    log_tail: str = ""

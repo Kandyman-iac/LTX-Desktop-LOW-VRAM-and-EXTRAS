@@ -17,6 +17,7 @@ from handlers.text_handler import TextHandler
 from handlers.magi_handler import MagiHandler
 from handlers.mmaudio_handler import MMAudioHandler
 from handlers.prismaudio_handler import PrismAudioHandler
+from handlers.qwentts_handler import QwenTTSHandler
 from handlers.queue_handler import QueueHandler
 from handlers.video_generation_handler import VideoGenerationHandler
 
@@ -39,5 +40,6 @@ __all__ = [
     "MagiHandler",
     "MMAudioHandler",
     "PrismAudioHandler",
+    "QwenTTSHandler",
     "QueueHandler",
 ]

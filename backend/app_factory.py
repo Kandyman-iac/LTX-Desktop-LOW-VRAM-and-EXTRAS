@@ -22,6 +22,7 @@ from _routes.ic_lora import router as ic_lora_router
 from _routes.magi import router as magi_router
 from _routes.mmaudio import router as mmaudio_router
 from _routes.prismaudio import router as prismaudio_router
+from _routes.qwentts import router as qwentts_router
 from _routes.tools import router as tools_router
 from _routes.image_gen import router as image_gen_router
 from _routes.models import router as models_router
@@ -128,6 +129,7 @@ def create_app(
     app.include_router(magi_router)
     app.include_router(mmaudio_router)
     app.include_router(prismaudio_router)
+    app.include_router(qwentts_router)
     app.include_router(tools_router)
     app.include_router(runtime_policy_router)
     app.include_router(outputs_router)
