@@ -740,6 +740,8 @@ function PromptBar({
   onStgBlockIndexChange,
   blockSwap,
   onBlockSwapChange,
+  reloadEveryNGens,
+  onReloadEveryNGensChange,
   processStatus = 'alive',
   useEnhancedView = false,
   onUseEnhancedViewChange,
@@ -802,6 +804,8 @@ function PromptBar({
   onStgBlockIndexChange?: (v: number) => void
   blockSwap?: number
   onBlockSwapChange?: (v: number) => void
+  reloadEveryNGens?: number
+  onReloadEveryNGensChange?: (v: number) => void
   processStatus?: string
   useEnhancedView?: boolean
   onUseEnhancedViewChange?: (v: boolean) => void
@@ -1159,11 +1163,11 @@ function PromptBar({
                 >−</button>
                 <span className="w-7 text-center text-sm text-white tabular-nums">{stgBlockIndex}</span>
                 <button
-                  onClick={() => onStgBlockIndexChange(Math.min(35, stgBlockIndex + 1))}
+                  onClick={() => onStgBlockIndexChange(Math.min(47, stgBlockIndex + 1))}
                   className="w-6 h-6 rounded bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white text-sm leading-none flex items-center justify-center"
                 >+</button>
               </div>
-              <span className="text-[10px] text-zinc-600">/ 35</span>
+              <span className="text-[10px] text-zinc-600">/ 47</span>
             </div>
           )}
 
@@ -1183,6 +1187,25 @@ function PromptBar({
                 >+</button>
               </div>
               <span className="text-[10px] text-zinc-500">blocks on GPU</span>
+            </div>
+          )}
+
+          {/* Reload Pipeline Every N Gens */}
+          {reloadEveryNGens != null && onReloadEveryNGensChange && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide w-12 shrink-0">Reload</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onReloadEveryNGensChange(Math.max(0, reloadEveryNGens - 1))}
+                  className="w-6 h-6 rounded bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white text-sm leading-none flex items-center justify-center"
+                >−</button>
+                <span className="w-7 text-center text-sm text-white tabular-nums">{reloadEveryNGens}</span>
+                <button
+                  onClick={() => onReloadEveryNGensChange(Math.min(100, reloadEveryNGens + 1))}
+                  className="w-6 h-6 rounded bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white text-sm leading-none flex items-center justify-center"
+                >+</button>
+              </div>
+              <span className="text-[10px] text-zinc-500">{reloadEveryNGens === 0 ? 'off' : 'gens/reload'}</span>
             </div>
           )}
         </div>
@@ -2622,6 +2645,8 @@ export function GenSpace() {
           onStgBlockIndexChange={setStgBlockIndex}
           blockSwap={appSettings.blockSwapBlocksOnGpu ?? 0}
           onBlockSwapChange={(v) => updateSettings({ blockSwapBlocksOnGpu: v })}
+          reloadEveryNGens={appSettings.reloadPipelineEveryNGens ?? 0}
+          onReloadEveryNGensChange={(v) => updateSettings({ reloadPipelineEveryNGens: v })}
           processStatus={processStatus ?? undefined}
           useEnhancedView={useEnhancedView}
           onUseEnhancedViewChange={setUseEnhancedView}

@@ -52,6 +52,7 @@ interface Window {
     checkPythonReady: () => Promise<{ ready: boolean }>
     startPythonSetup: () => Promise<void>
     startPythonBackend: () => Promise<void>
+    restartPythonBackend: () => Promise<void>
     getBackendHealthStatus: () => Promise<BackendHealthStatus | null>
     onPythonSetupProgress: (cb: (data: unknown) => void) => void
     removePythonSetupProgress: () => void
