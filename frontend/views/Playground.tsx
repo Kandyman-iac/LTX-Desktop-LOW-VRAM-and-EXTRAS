@@ -75,6 +75,18 @@ export function Playground() {
     stgScale: appSettings.stgScale,
     stgBlockIndex: appSettings.stgBlockIndex,
   })
+  // Keep overrides in sync with global settings defaults.
+  // Without this, changes made in the Settings Modal are silently ignored:
+  // inferenceOverrides is init'd once and the backend treats its values as
+  // explicit per-gen overrides that take priority over appSettings.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setInferenceOverrides({
+      numSteps: appSettings.distilledNumSteps,
+      stgScale: appSettings.stgScale,
+      stgBlockIndex: appSettings.stgBlockIndex,
+    })
+  }, [appSettings.distilledNumSteps, appSettings.stgScale, appSettings.stgBlockIndex])
   const [showHistory, setShowHistory] = useState(false)
   const [showOutputBrowser, setShowOutputBrowser] = useState(false)
   const { push: pushHistory, getAll: getHistory, remove: removeHistory } = useGenerationHistory()
