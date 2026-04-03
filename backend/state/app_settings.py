@@ -121,10 +121,27 @@ class AppSettings(SettingsBaseModel):
     # "euler"               = standard first-order Euler sampler (default).
     # "gradient_estimating" = velocity correction across consecutive steps; can improve
     #                         temporal consistency (paper: openreview.net/pdf?id=o2ND9v0CeK).
+    # Denoising loop algorithm for the distilled pipeline.
+    # "euler"               = standard first-order Euler sampler (default).
+    # "gradient_estimating" = velocity correction across consecutive steps; can improve
+    #                         temporal consistency (paper: openreview.net/pdf?id=o2ND9v0CeK).
+    # "res2s"               = second-order Runge-Kutta + SDE noise injection.  Two model
+    #                         evaluations per step (2× slower per step, but may match Euler
+    #                         quality at half the step count).  Uses Res2sDiffusionStep;
+    #                         stochastic — results vary even at fixed seed.
     denoising_loop: str = "euler"
     # Gradient correction strength. Only used when denoising_loop="gradient_estimating".
     # Default 2.0 (paper default). Higher = stronger correction; may over-smooth motion.
     ge_gamma: float = 2.0
+    # res2s anchor-point refinement ("bong iteration").  When enabled, the midpoint
+    # estimate is iteratively tightened up to res2s_bongmath_max_iter times for steps
+    # where the step size h < 0.5.  With the distilled sigma schedule virtually every
+    # step has h < 0.5, so this multiplies compute by res2s_bongmath_max_iter.
+    # Disable for a fast/cheap res2s run; enable for higher-quality RK midpoint.
+    res2s_bongmath: bool = False
+    # Maximum anchor-refinement iterations when res2s_bongmath=True.
+    # The distilled schedule has very small step sizes so even 5–10 iter is slow.
+    res2s_bongmath_max_iter: int = 5
 
     @field_validator("block_swap_blocks_on_gpu", mode="before")
     @classmethod
@@ -259,6 +276,8 @@ class SettingsResponse(SettingsBaseModel):
     distilled_sigma_schedule: str = "distilled"
     denoising_loop: str = "euler"
     ge_gamma: float = 2.0
+    res2s_bongmath: bool = False
+    res2s_bongmath_max_iter: int = 5
 
 
 def to_settings_response(settings: AppSettings) -> SettingsResponse:

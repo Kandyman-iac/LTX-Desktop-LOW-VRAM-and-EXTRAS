@@ -49,6 +49,8 @@ export interface AppSettings {
   distilledSigmaSchedule: string
   denoisingLoop: string
   geGamma: number
+  res2sBongmath: boolean
+  res2sBongmathMaxIter: number
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -88,6 +90,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   distilledSigmaSchedule: 'distilled',
   denoisingLoop: 'euler',
   geGamma: 2.0,
+  res2sBongmath: false,
+  res2sBongmathMaxIter: 5,
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -157,6 +161,8 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     distilledSigmaSchedule: data.distilledSigmaSchedule ?? DEFAULT_APP_SETTINGS.distilledSigmaSchedule,
     denoisingLoop: data.denoisingLoop ?? DEFAULT_APP_SETTINGS.denoisingLoop,
     geGamma: data.geGamma ?? DEFAULT_APP_SETTINGS.geGamma,
+    res2sBongmath: data.res2sBongmath ?? DEFAULT_APP_SETTINGS.res2sBongmath,
+    res2sBongmathMaxIter: data.res2sBongmathMaxIter ?? DEFAULT_APP_SETTINGS.res2sBongmathMaxIter,
   }
 }
 

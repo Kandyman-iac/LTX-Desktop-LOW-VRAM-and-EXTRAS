@@ -1304,7 +1304,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       <p className="text-xs text-zinc-500">GE adds velocity correction — may improve temporal consistency</p>
                     </div>
                     <div className="flex gap-1 p-0.5 bg-zinc-900 border border-zinc-700 rounded-lg">
-                      {(['euler', 'gradient_estimating'] as const).map(l => (
+                      {(['euler', 'gradient_estimating', 'res2s'] as const).map(l => (
                         <button
                           key={l}
                           onClick={() => onSettingsChange({ ...settings, denoisingLoop: l })}
@@ -1314,7 +1314,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                               : 'text-zinc-400 hover:text-white'
                           }`}
                         >
-                          {l === 'euler' ? 'Euler (default)' : 'GE'}
+                          {l === 'euler' ? 'Euler (default)' : l === 'gradient_estimating' ? 'GE' : 'RK2 (res2s)'}
                         </button>
                       ))}
                     </div>
@@ -1340,6 +1340,48 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                         className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
                       />
                     </div>
+                  )}
+
+                  {/* RK2 (res2s) controls — only when res2s loop active */}
+                  {(settings.denoisingLoop ?? 'euler') === 'res2s' && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="text-sm text-zinc-300">Anchor Refinement</label>
+                          <p className="text-xs text-zinc-500">Iteratively tightens the RK midpoint. Expensive — nearly every distilled step has h&lt;0.5 so bong iterations fire every step. Disable for fast RK2; enable for highest-quality midpoint.</p>
+                        </div>
+                        <button
+                          onClick={() => onSettingsChange({ ...settings, res2sBongmath: !(settings.res2sBongmath ?? false) })}
+                          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            (settings.res2sBongmath ?? false) ? 'bg-green-500' : 'bg-zinc-700'
+                          }`}
+                        >
+                          <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            (settings.res2sBongmath ?? false) ? 'translate-x-5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+                      {(settings.res2sBongmath ?? false) && (
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="text-sm text-zinc-300">Max Iterations</label>
+                            <p className="text-xs text-zinc-500">Anchor refinement cap per step (default 5; library default 100 — very slow)</p>
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            step={1}
+                            value={settings.res2sBongmathMaxIter ?? 5}
+                            onChange={(e) => {
+                              const v = Math.max(1, Math.min(100, parseInt(e.target.value) || 5))
+                              onSettingsChange({ ...settings, res2sBongmathMaxIter: v })
+                            }}
+                            className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* Upscaler Toggle */}
@@ -1368,7 +1410,8 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   Current: {settings.distilledNumSteps ?? 8} steps
                   {(settings.stgScale ?? 0) > 0 ? `, STG ${settings.stgScale} (block ${settings.stgBlockIndex ?? 19})` : ''}
                   {', σ:'}{settings.distilledSigmaSchedule ?? 'distilled'}
-                  {(settings.denoisingLoop ?? 'euler') !== 'euler' ? `, GE γ=${settings.geGamma ?? 2.0}` : ''}
+                  {(settings.denoisingLoop ?? 'euler') === 'gradient_estimating' ? `, GE γ=${settings.geGamma ?? 2.0}` : ''}
+                  {(settings.denoisingLoop ?? 'euler') === 'res2s' ? `, RK2${(settings.res2sBongmath ?? false) ? ` bong×${settings.res2sBongmathMaxIter ?? 5}` : ''}` : ''}
                   {', '}{settings.fastModel?.useUpscaler !== false ? 'with upscaler' : 'native resolution'}
                 </div>
               </div>

@@ -350,6 +350,8 @@ class LTXFastVideoPipeline:
         sigma_schedule: str = "distilled",
         denoising_loop: str = "euler",
         ge_gamma: float = 2.0,
+        res2s_bongmath: bool = False,
+        res2s_bongmath_max_iter: int = 5,
     ) -> tuple[torch.Tensor | Iterator[torch.Tensor], AudioOrNone]:
         from ltx_pipelines.utils.args import ImageConditioningInput as _LtxImageInput
         import ltx_pipelines.distilled as _distilled_mod
@@ -393,6 +395,41 @@ class LTXFastVideoPipeline:
                 gradient_estimating_euler_denoising_loop, ge_gamma=ge_gamma
             )
 
+        elif denoising_loop == "res2s":
+            # res2s is a second-order Runge-Kutta sampler with SDE noise injection.
+            # distilled.py hardcodes EulerDiffusionStep as its stepper, so we replace
+            # the euler_denoising_loop name at module level with a wrapper that
+            # substitutes Res2sDiffusionStep and calls res2s instead.
+            # Cost: 2× model evaluations per step vs Euler.
+            # Benefit: may match Euler quality at half the step count; SDE noise
+            # can break up deterministic artifacts.
+            from functools import partial
+            from ltx_core.components.diffusion_steps import Res2sDiffusionStep
+            from ltx_pipelines.utils.samplers import res2s_audio_video_denoising_loop
+
+            _res2s_stepper = Res2sDiffusionStep()
+
+            def _res2s_as_euler(
+                sigmas: torch.Tensor,
+                video_state: object,
+                audio_state: object,
+                stepper: object,  # EulerDiffusionStep from distilled.py — ignored
+                denoise_fn: object,
+                **_kwargs: object,
+            ) -> object:
+                return res2s_audio_video_denoising_loop(
+                    sigmas=sigmas,
+                    video_state=video_state,  # type: ignore[arg-type]
+                    audio_state=audio_state,  # type: ignore[arg-type]
+                    stepper=_res2s_stepper,
+                    denoise_fn=denoise_fn,  # type: ignore[arg-type]
+                    noise_seed=seed,
+                    bongmath=res2s_bongmath,
+                    bongmath_max_iter=res2s_bongmath_max_iter,
+                )
+
+            _distilled_mod.euler_denoising_loop = _res2s_as_euler  # type: ignore[attr-defined]
+
         try:
             return self.pipeline(
                 prompt=prompt,
@@ -432,6 +469,8 @@ class LTXFastVideoPipeline:
         sigma_schedule: str = "distilled",
         denoising_loop: str = "euler",
         ge_gamma: float = 2.0,
+        res2s_bongmath: bool = False,
+        res2s_bongmath_max_iter: int = 5,
     ) -> None:
         tiling_config = default_tiling_config(
             spatial_tile_size=self._vae_spatial_tile_size,
@@ -452,6 +491,8 @@ class LTXFastVideoPipeline:
             sigma_schedule=sigma_schedule,
             denoising_loop=denoising_loop,
             ge_gamma=ge_gamma,
+            res2s_bongmath=res2s_bongmath,
+            res2s_bongmath_max_iter=res2s_bongmath_max_iter,
         )
         chunks = video_chunks_number(num_frames, tiling_config)
         encode_video_output(video=video, audio=audio, fps=int(frame_rate), output_path=output_path, video_chunks_number_value=chunks)

@@ -393,7 +393,7 @@ export function InferencePanel({ overrides, defaults, onChange, disabled = false
                 <p className="text-[10px] text-zinc-500">GE adds velocity correction per step</p>
               </div>
               <div className="flex gap-1 p-0.5 bg-zinc-900 border border-zinc-700 rounded-lg">
-                {(['euler', 'gradient_estimating'] as const).map(l => (
+                {(['euler', 'gradient_estimating', 'res2s'] as const).map(l => (
                   <button
                     key={l}
                     disabled={disabled}
@@ -404,7 +404,7 @@ export function InferencePanel({ overrides, defaults, onChange, disabled = false
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    {l === 'euler' ? 'Euler (def)' : 'GE'}
+                    {l === 'euler' ? 'Euler (def)' : l === 'gradient_estimating' ? 'GE' : 'RK2'}
                   </button>
                 ))}
               </div>
@@ -432,13 +432,58 @@ export function InferencePanel({ overrides, defaults, onChange, disabled = false
                 />
               </div>
             )}
+
+            {/* RK2 (res2s) controls — only when res2s loop active */}
+            {(gs.denoisingLoop ?? 'euler') === 'res2s' && (
+              <>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs text-zinc-300">Anchor Refine</label>
+                    <p className="text-[10px] text-zinc-500">Bong iter (slow; off = fast RK2)</p>
+                  </div>
+                  <button
+                    disabled={disabled}
+                    onClick={() => updateSettings({ res2sBongmath: !(gs.res2sBongmath ?? false) })}
+                    className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
+                      (gs.res2sBongmath ?? false) ? 'bg-green-500' : 'bg-zinc-700'
+                    }`}
+                  >
+                    <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      (gs.res2sBongmath ?? false) ? 'translate-x-4' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+                {(gs.res2sBongmath ?? false) && (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs text-zinc-300">Max Iterations</label>
+                      <p className="text-[10px] text-zinc-500">Per-step anchor refinement limit</p>
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={gs.res2sBongmathMaxIter ?? 5}
+                      disabled={disabled}
+                      onChange={(e) => {
+                        const v = Math.max(1, Math.min(100, parseInt(e.target.value) || 5))
+                        updateSettings({ res2sBongmathMaxIter: v })
+                      }}
+                      className="w-14 px-2 py-1 bg-zinc-700 border border-zinc-600 rounded-lg text-xs text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                    />
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           <p className="text-[10px] text-zinc-500">
             {overrides.numSteps} steps
             {overrides.stgScale > 0 ? `, STG ${overrides.stgScale} (block ${overrides.stgBlockIndex})` : ''}
             {(gs.distilledSigmaSchedule ?? 'distilled') !== 'distilled' ? `, σ:${gs.distilledSigmaSchedule}` : ''}
-            {(gs.denoisingLoop ?? 'euler') !== 'euler' ? `, GE γ=${gs.geGamma ?? 2.0}` : ''}
+            {(gs.denoisingLoop ?? 'euler') === 'gradient_estimating' ? `, GE γ=${gs.geGamma ?? 2.0}` : ''}
+            {(gs.denoisingLoop ?? 'euler') === 'res2s' ? `, RK2${(gs.res2sBongmath ?? false) ? ` bong×${gs.res2sBongmathMaxIter ?? 5}` : ''}` : ''}
           </p>
         </div>
 
