@@ -455,11 +455,13 @@ class LTXFastVideoPipeline:
         )
         chunks = video_chunks_number(num_frames, tiling_config)
         encode_video_output(video=video, audio=audio, fps=int(frame_rate), output_path=output_path, video_chunks_number_value=chunks)
-        # Synchronize after VAE decode + audio write so all GPU→CPU transfers
-        # finish before inference_mode context exits.  Explicit delete + cache
-        # clear keeps VRAM tidy for the next generation.
-        del video, audio
+        # Synchronize BEFORE freeing GPU tensors so any CUDA ops still queued
+        # inside encode_video (tiled VAE decode iterator, audio write) are fully
+        # complete before Python GC can reclaim the underlying CUDA memory.
+        # del-then-sync is wrong: the tensor backing memory is freed immediately
+        # on del (refcount → 0) while CUDA is still accessing it → 0xC0000005.
         torch.cuda.synchronize()
+        del video, audio
         torch.cuda.empty_cache()
 
     @torch.inference_mode()

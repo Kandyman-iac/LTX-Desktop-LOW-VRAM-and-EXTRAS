@@ -291,8 +291,8 @@ class LTXDevVideoPipeline:
         )
         chunks = video_chunks_number(num_frames, tiling_config)
         encode_video_output(video=video, audio=audio, fps=int(frame_rate), output_path=output_path, video_chunks_number_value=chunks)
-        del video, audio
         torch.cuda.synchronize()
+        del video, audio
         torch.cuda.empty_cache()
 
     @torch.inference_mode()
