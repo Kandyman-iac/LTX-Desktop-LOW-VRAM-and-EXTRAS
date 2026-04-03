@@ -25,6 +25,7 @@ class ModelFileDownloadSpec:
 
 MODEL_FILE_ORDER: tuple[ModelFileType, ...] = (
     "checkpoint",
+    "dev_checkpoint",
     "upsampler",
     "distilled_lora",
     "ic_lora",
@@ -42,7 +43,18 @@ DEFAULT_MODEL_DOWNLOAD_SPECS: dict[ModelFileType, ModelFileDownloadSpec] = {
         expected_size_bytes=43_000_000_000,
         is_folder=False,
         repo_id="Lightricks/LTX-2.3",
-        description="Main transformer model",
+        description="Main transformer model (distilled, fast pipeline)",
+    ),
+    # Full dev/pro checkpoint — used by the two-stage pipeline (TI2VidTwoStagesPipeline).
+    # Stage 1 runs this model with CFG guidance at half resolution; stage 2 applies the
+    # distilled LoRA to refine at full resolution.  This is the highest-quality mode.
+    # FP8 variant (~23 GB) is the practical choice for consumer GPUs.
+    "dev_checkpoint": ModelFileDownloadSpec(
+        relative_path=Path("ltx-2.3-22b-dev_fp8.safetensors"),
+        expected_size_bytes=23_000_000_000,
+        is_folder=False,
+        repo_id="Lightricks/LTX-2.3",
+        description="Dev/Pro transformer (two-stage pipeline, FP8)",
     ),
     "upsampler": ModelFileDownloadSpec(
         relative_path=Path("ltx-2.3-spatial-upscaler-x2-1.1.safetensors"),

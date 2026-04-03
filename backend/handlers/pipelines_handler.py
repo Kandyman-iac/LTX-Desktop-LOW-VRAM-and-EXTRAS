@@ -170,7 +170,6 @@ class PipelinesHandler(StateHandlerBase):
     def _create_video_pipeline(self, model_type: VideoPipelineModelType) -> VideoPipelineState:
         gemma_root = self._text_handler.resolve_gemma_root()
 
-        checkpoint_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "checkpoint"))
         upsampler_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "upsampler"))
 
         settings = self.state.app_settings
@@ -178,6 +177,20 @@ class PipelinesHandler(StateHandlerBase):
         lora_entries = self._parse_lora_entries(settings)
 
         if model_type == "dev":
+            # Use the dev checkpoint (full model, not distilled) for the two-stage pipeline.
+            # Falls back to the distilled checkpoint if dev_checkpoint is not present so
+            # existing setups without the dev file don't hard-fail (quality will be lower).
+            dev_ckpt = resolve_model_path(self.models_dir, self.config.model_download_specs, "dev_checkpoint")
+            if dev_ckpt.exists():
+                checkpoint_path = str(dev_ckpt)
+                logger.info("Dev pipeline: using dev checkpoint %s", dev_ckpt.name)
+            else:
+                checkpoint_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "checkpoint"))
+                logger.warning(
+                    "Dev pipeline: dev checkpoint (%s) not found — falling back to distilled checkpoint."
+                    " Download %s for correct two-stage quality.",
+                    dev_ckpt.name, dev_ckpt.name,
+                )
             pipeline = self._create_dev_pipeline(
                 checkpoint_path=checkpoint_path,
                 upsampler_path=upsampler_path,
@@ -187,6 +200,7 @@ class PipelinesHandler(StateHandlerBase):
                 lora_entries=lora_entries,
             )
         else:
+            checkpoint_path = str(resolve_model_path(self.models_dir, self.config.model_download_specs, "checkpoint"))
             pipeline = self._create_fast_pipeline(
                 checkpoint_path=checkpoint_path,
                 upsampler_path=upsampler_path,

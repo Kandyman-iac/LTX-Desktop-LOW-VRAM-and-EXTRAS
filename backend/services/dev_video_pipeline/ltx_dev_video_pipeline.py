@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 import logging
 import os
+from pathlib import Path
 from typing import Final, cast
 
 import torch
@@ -82,7 +83,16 @@ class LTXDevVideoPipeline:
         self._vae_spatial_tile_size = vae_spatial_tile_size
         self._vae_temporal_tile_size = vae_temporal_tile_size
 
-        use_fp8 = use_fp8_transformer or device_supports_fp8(device)
+        # If the checkpoint file is already pre-quantized FP8 (filename contains _fp8)
+        # do NOT apply fp8_cast on top — the weights are already in FP8 format.
+        # For BF16 dev checkpoints, fp8_cast downcasts at load time to save VRAM.
+        checkpoint_already_fp8 = "_fp8" in Path(checkpoint_path).stem
+        if checkpoint_already_fp8:
+            quantization = None
+            _log.info("Dev pipeline: pre-quantized FP8 checkpoint detected — skipping fp8_cast")
+        else:
+            use_fp8 = use_fp8_transformer or device_supports_fp8(device)
+            quantization = QuantizationPolicy.fp8_cast() if use_fp8 else None
 
         self.pipeline = TI2VidTwoStagesPipeline(
             checkpoint_path=checkpoint_path,
@@ -91,7 +101,7 @@ class LTXDevVideoPipeline:
             gemma_root=cast(str, gemma_root),
             loras=[],
             device=device,
-            quantization=QuantizationPolicy.fp8_cast() if use_fp8 else None,
+            quantization=quantization,
         )
 
         # GGUF must be installed first — it replaces transformer_builder on both
